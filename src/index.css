@@ -1,0 +1,270 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222 47% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 243 75% 59%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 231 28% 5%;       /* #090a0f */
+    --foreground: 210 40% 98%;
+    --card: 228 20% 9%;             /* #11131a */
+    --card-foreground: 210 40% 98%;
+    --popover: 228 20% 9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 239 84% 67%;         /* #6366f1 electric violet */
+    --primary-foreground: 210 40% 98%;
+    --secondary: 225 18% 13%;       /* #181b24 */
+    --secondary-foreground: 210 40% 98%;
+    --muted: 225 18% 13%;
+    --muted-foreground: 217.9 10.6% 64.9%;
+    --accent: 225 18% 13%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 50.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 226 23% 18%;          /* #232838 */
+    --input: 226 23% 18%;
+    --ring: 239 84% 67%;
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 150, 180, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(140, 150, 180, 0.45);
+}
+
+/* TipTap ProseMirror Editor Styles */
+.tiptap {
+  outline: none !important;
+  min-height: 380px;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #64748b;
+  pointer-events: none;
+  height: 0;
+  font-style: italic;
+}
+
+.dark .tiptap p.is-editor-empty:first-child::before {
+  color: #4b5563;
+}
+
+.tiptap h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: inherit;
+  letter-spacing: -0.02em;
+}
+
+.tiptap h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  color: inherit;
+  letter-spacing: -0.01em;
+}
+
+.tiptap h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-top: 0.85rem;
+  margin-bottom: 0.35rem;
+  color: inherit;
+}
+
+.tiptap p {
+  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
+  line-height: 1.7;
+}
+
+.tiptap ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.tiptap li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  line-height: 1.6;
+}
+
+.tiptap blockquote {
+  border-left: 3px solid #6366f1;
+  padding-left: 1rem;
+  margin-left: 0;
+  margin-right: 0;
+  font-style: italic;
+  color: #94a3b8;
+}
+
+.dark .tiptap blockquote {
+  border-left-color: #818cf8;
+  color: #cbd5e1;
+}
+
+.tiptap pre {
+  background: #0f111a;
+  border: 1px solid #232838;
+  border-radius: 0.5rem;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0.85rem 1.15rem;
+  margin: 0.85rem 0;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+
+.light .tiptap pre {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+}
+
+.tiptap code {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.35rem;
+  font-size: 0.875em;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.light .tiptap code {
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+}
+
+.tiptap pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.tiptap hr {
+  border: none;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  margin: 1.75rem 0;
+}
+
+.tiptap img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tiptap a {
+  color: #6366f1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tiptap a:hover {
+  color: #818cf8;
+}
+
+/* Task lists */
+ul[data-type="taskList"] {
+  list-style: none;
+  padding: 0;
+}
+
+ul[data-type="taskList"] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+ul[data-type="taskList"] li > label {
+  flex: 0 0 auto;
+  user-select: none;
+  margin-top: 0.2rem;
+}
+
+ul[data-type="taskList"] li > div {
+  flex: 1 1 auto;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(17, 19, 26, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.light .glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}

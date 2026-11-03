@@ -1,0 +1,324 @@
+import React, { useState, useMemo } from 'react';
+import type { Note } from '../../types/note';
+import { 
+  Plus, 
+  Search, 
+  Pin, 
+  Share2, 
+  Trash2, 
+  Paperclip, 
+  Calendar,
+  FileText,
+  X,
+  Sparkles
+} from 'lucide-react';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+
+interface SidebarProps {
+  notes: Note[];
+  activeNoteId: string | null;
+  onSelectNote: (id: string) => void;
+  onCreateNote: (template?: { title?: string; content?: string }) => void;
+  onDeleteNote: (id: string) => void;
+  onCloseMobile?: () => void;
+  isMobileOpen?: boolean;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  notes,
+  activeNoteId,
+  onSelectNote,
+  onCreateNote,
+  onDeleteNote,
+  onCloseMobile,
+  isMobileOpen = false,
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filter, setFilter] = useState<'all' | 'pinned' | 'shared'>('all');
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+
+  // Helper to extract plain text snippet from TipTap HTML
+  const getExcerpt = (html: string) => {
+    if (!html) return 'Nota vazia';
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const text = temp.textContent || temp.innerText || '';
+    return text.trim().slice(0, 80) || 'Sem conteúdo adicional';
+  };
+
+  // Filter notes by search query and category
+  const filteredNotes = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return notes
+      .filter((note) => {
+        // Search in title and content
+        if (q) {
+          const matchTitle = note.title.toLowerCase().includes(q);
+          const temp = document.createElement('div');
+          temp.innerHTML = note.content;
+          const matchContent = (temp.textContent || '').toLowerCase().includes(q);
+          if (!matchTitle && !matchContent) return false;
+        }
+
+        // Category filter
+        if (filter === 'pinned' && !note.is_pinned) return false;
+        if (filter === 'shared' && (!note.share || !note.share.is_active)) return false;
+
+        return true;
+      })
+      .sort((a, b) => {
+        // Pinned notes come first
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        // Then by updated_at descending
+        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      });
+  }, [notes, searchQuery, filter]);
+
+  const formatDate = (isoDate: string) => {
+    try {
+      const date = new Date(isoDate);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+
+      if (isToday) {
+        return `Hoje às ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+      }
+      return date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+    } catch {
+      return '';
+    }
+  };
+
+  return (
+    <>
+      <aside
+        className={`w-80 lg:w-84 shrink-0 flex flex-col h-full bg-gray-50 dark:bg-dark-surface border-r border-gray-200 dark:border-[#232838] transition-all z-40 ${
+          isMobileOpen
+            ? 'fixed inset-y-0 left-0 shadow-2xl flex'
+            : 'hidden md:flex'
+        }`}
+      >
+        {/* Sidebar Header / Brand */}
+        <div className="p-4 border-b border-gray-200 dark:border-[#232838] flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white font-black text-sm shadow-md shadow-brand-500/20">
+              7
+            </div>
+            <div>
+              <h1 className="font-bold text-base tracking-tight text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                7NotPad
+                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                  v1.0
+                </span>
+              </h1>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">Bloco de Notas Online</p>
+            </div>
+          </div>
+
+          {isMobileOpen && (
+            <button
+              onClick={onCloseMobile}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-200 dark:hover:bg-[#181b24] md:hidden"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
+        {/* New Note Button */}
+        <div className="p-3">
+          <button
+            type="button"
+            onClick={() => {
+              onCreateNote();
+              if (onCloseMobile) onCloseMobile();
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-sm shadow-md shadow-brand-600/25 transition-all group active:scale-[0.98]"
+          >
+            <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
+            <span>Nova Nota</span>
+            <span className="hidden sm:inline-block text-[11px] opacity-70 ml-auto font-mono bg-white/10 px-1.5 py-0.5 rounded">
+              Ctrl+N
+            </span>
+          </button>
+        </div>
+
+        {/* Search Input */}
+        <div className="px-3 pb-2">
+          <div className="flex items-center px-3 py-2 rounded-xl bg-white dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] focus-within:ring-2 focus-within:ring-brand-500/40 transition-all">
+            <Search className="w-4 h-4 text-gray-400 mr-2 shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Pesquisar por título ou texto..."
+              className="w-full bg-transparent text-xs text-gray-900 dark:text-gray-100 placeholder:text-gray-400 outline-none"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="text-gray-400 hover:text-gray-200 p-0.5"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 px-3 pb-3 border-b border-gray-200 dark:border-[#232838] overflow-x-auto text-xs">
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-2.5 py-1 rounded-lg font-medium transition-colors ${
+              filter === 'all'
+                ? 'bg-brand-500/15 text-brand-400 border border-brand-500/30'
+                : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
+          >
+            Todas ({notes.length})
+          </button>
+          <button
+            onClick={() => setFilter('pinned')}
+            className={`px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1 ${
+              filter === 'pinned'
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
+          >
+            <Pin className="w-3 h-3" />
+            Fixadas
+          </button>
+          <button
+            onClick={() => setFilter('shared')}
+            className={`px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1 ${
+              filter === 'shared'
+                ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
+                : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
+          >
+            <Share2 className="w-3 h-3" />
+            Compartilhadas
+          </button>
+        </div>
+
+        {/* Notes List */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {filteredNotes.length === 0 ? (
+            <div className="p-6 text-center text-gray-400 dark:text-gray-500 space-y-2">
+              <FileText className="w-8 h-8 mx-auto opacity-40" />
+              <p className="text-xs font-medium">Nenhuma nota encontrada</p>
+              <p className="text-[11px] opacity-70">
+                {searchQuery
+                  ? 'Tente pesquisar com outras palavras-chave.'
+                  : 'Clique em "Nova Nota" para começar.'}
+              </p>
+            </div>
+          ) : (
+            filteredNotes.map((note) => {
+              const isActive = note.id === activeNoteId;
+              const excerpt = getExcerpt(note.content);
+              const isShared = Boolean(note.share && note.share.is_active);
+
+              return (
+                <div
+                  key={note.id}
+                  onClick={() => {
+                    onSelectNote(note.id);
+                    if (onCloseMobile) onCloseMobile();
+                  }}
+                  className={`group relative p-3 rounded-2xl cursor-pointer transition-all border ${
+                    isActive
+                      ? 'bg-white dark:bg-[#181b24] border-brand-500/40 shadow-sm'
+                      : 'bg-transparent hover:bg-gray-100/70 dark:hover:bg-[#14161f] border-transparent hover:border-gray-200 dark:hover:border-[#232838]'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <h3
+                      className={`text-sm font-semibold truncate ${
+                        isActive
+                          ? 'text-brand-600 dark:text-brand-400'
+                          : 'text-gray-800 dark:text-gray-200'
+                      }`}
+                    >
+                      {note.title.trim() || 'Nota sem título'}
+                    </h3>
+
+                    {/* Delete button (with confirmation) */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNoteToDelete(note.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 transition-all shrink-0"
+                      title="Excluir nota"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed mb-2">
+                    {excerpt}
+                  </p>
+
+                  <div className="flex items-center justify-between text-[11px] text-gray-400">
+                    <div className="flex items-center gap-1">
+                      <Calendar className="w-3 h-3 opacity-60" />
+                      <span>{formatDate(note.updated_at)}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {note.is_pinned && (
+                        <span title="Nota fixada" className="text-amber-400">
+                          <Pin className="w-3 h-3 fill-amber-400" />
+                        </span>
+                      )}
+                      {isShared && (
+                        <span title="Compartilhada" className="text-cyan-400">
+                          <Share2 className="w-3 h-3" />
+                        </span>
+                      )}
+                      {note.attachments && note.attachments.length > 0 && (
+                        <span title={`${note.attachments.length} anexo(s)`} className="flex items-center gap-0.5 text-brand-400">
+                          <Paperclip className="w-3 h-3" />
+                          <span className="text-[10px]">{note.attachments.length}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Sidebar Footer: Note Count & Notice */}
+        <div className="p-3 border-t border-gray-200 dark:border-[#232838] text-[11px] text-gray-400 dark:text-gray-500 flex items-center justify-between">
+          <span>{notes.length} notas no navegador</span>
+          <span className="flex items-center gap-1 text-brand-400">
+            <Sparkles className="w-3 h-3" />
+            7NotPad
+          </span>
+        </div>
+      </aside>
+
+      {/* Confirmation Dialog for Deleting Note */}
+      <ConfirmDialog
+        isOpen={Boolean(noteToDelete)}
+        title="Excluir Nota?"
+        message="Tem certeza de que deseja excluir permanentemente esta nota? Esta ação não pode ser revertida."
+        confirmText="Excluir"
+        cancelText="Cancelar"
+        isDestructive={true}
+        onConfirm={() => {
+          if (noteToDelete) {
+            onDeleteNote(noteToDelete);
+            setNoteToDelete(null);
+          }
+        }}
+        onCancel={() => setNoteToDelete(null)}
+      />
+    </>
+  );
+};
