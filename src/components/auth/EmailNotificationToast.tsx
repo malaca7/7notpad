@@ -1,15 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { subscribeToDispatchedEmails } from '../../lib/emailService';
 import type { DispatchedEmail } from '../../types/auth';
-import { Mail, Copy, Check, ExternalLink, X, ShieldAlert } from 'lucide-react';
+import { Mail, Copy, Check, ExternalLink, X, ShieldAlert, CheckCircle2 } from 'lucide-react';
+
+interface EnhancedDispatchedEmail extends DispatchedEmail {
+  deliveredExternally?: boolean;
+  externalError?: string;
+}
 
 export const EmailNotificationToast: React.FC = () => {
-  const [emails, setEmails] = useState<DispatchedEmail[]>([]);
+  const [emails, setEmails] = useState<EnhancedDispatchedEmail[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = subscribeToDispatchedEmails(newEmail => {
-      setEmails(prev => [newEmail, ...prev.slice(0, 2)]); // Keep up to 3 recent
+      setEmails(prev => [newEmail, ...prev.slice(0, 2)]);
     });
     return unsub;
   }, []);
@@ -41,7 +46,9 @@ export const EmailNotificationToast: React.FC = () => {
                 <span className="p-1 rounded-md bg-brand-500/20">
                   <Mail className="w-3.5 h-3.5" />
                 </span>
-                <span>E-mail Transacional Enviado</span>
+                <span>
+                  {email.deliveredExternally ? 'E-mail Enviado para sua Caixa de Entrada!' : 'Código de Confirmação Emitido'}
+                </span>
               </div>
               <button
                 onClick={() => dismissEmail(email.id)}
@@ -52,12 +59,19 @@ export const EmailNotificationToast: React.FC = () => {
               </button>
             </div>
 
-            <p className="text-xs text-slate-300 font-medium truncate mb-1">
+            <p className="text-xs text-slate-300 font-medium truncate mb-0.5">
               Para: <span className="text-white font-semibold">{email.to}</span>
             </p>
-            <p className="text-xs text-slate-400 mb-3 font-mono truncate">
+            <p className="text-xs text-slate-400 mb-2 font-mono truncate">
               Assunto: {email.subject}
             </p>
+
+            {email.deliveredExternally ? (
+              <div className="mb-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] flex items-center gap-1.5 font-medium">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>Enviado via servidor de e-mail. Verifique sua Caixa de Entrada/Spam.</span>
+              </div>
+            ) : null}
 
             {email.code && (
               <div className="bg-slate-800/80 rounded-xl p-3 border border-slate-700/60 flex items-center justify-between gap-3">
@@ -106,4 +120,3 @@ export const EmailNotificationToast: React.FC = () => {
     </div>
   );
 };
-

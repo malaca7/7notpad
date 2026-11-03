@@ -13,11 +13,13 @@ import {
   EyeOff, 
   AtSign,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Check
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { CodeInput } from './CodeInput';
 import { AuthService, isValidEmail, isValidUsername } from '../../lib/authService';
+import { getLastDispatchedEmail, getEmailConfig } from '../../lib/emailService';
 
 export type AuthModalView = 
   | 'login' 
@@ -34,6 +36,7 @@ interface AuthModalProps {
   initialEmail?: string;
   resetToken?: string;
   onSuccess?: () => void;
+  onOpenSettings?: (tab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup') => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -42,7 +45,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialView = 'login',
   initialEmail = '',
   resetToken = '',
-  onSuccess
+  onSuccess,
+  onOpenSettings
 }) => {
   const [view, setView] = useState<AuthModalView>(initialView);
 
@@ -55,6 +59,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [sixDigitCode, setSixDigitCode] = useState('');
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [recoveryMethod, setRecoveryMethod] = useState<'code' | 'link'>('code');
+
+  const emailConfig = getEmailConfig();
+  const lastDispatched = getLastDispatchedEmail(email) || getLastDispatchedEmail();
+  const availableCode = lastDispatched?.code;
 
   // Password visibility toggles
   const [showPassword, setShowPassword] = useState(false);
@@ -697,12 +705,63 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               />
             </div>
 
+            {/* Quick auto-fill button if code is available locally/simulated */}
+            {availableCode && sixDigitCode !== availableCode && (
+              <div className="p-2.5 bg-brand-500/10 border border-brand-500/30 rounded-xl flex items-center justify-between text-xs">
+                <div className="text-left">
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Código Gerado:</span>
+                  <span className="font-mono text-sm font-bold text-brand-400 tracking-widest">{availableCode}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSixDigitCode(availableCode)}
+                  className="px-2.5 py-1 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg text-xs transition-colors flex items-center gap-1"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Preencher
+                </button>
+              </div>
+            )}
+
             {/* Countdown timer */}
             <div className="flex items-center justify-center gap-2 text-xs font-mono">
               <span className="text-slate-400">Código expira em:</span>
               <span className={`font-bold ${secondsRemaining < 60 ? 'text-red-400 animate-pulse' : 'text-amber-400'}`}>
                 {formatCountdown(secondsRemaining)}
               </span>
+            </div>
+
+            {/* Guidance Box about Email Delivery */}
+            <div className="p-3.5 rounded-xl bg-slate-800/80 border border-slate-700/80 text-left text-xs space-y-2">
+              <div className="flex items-center justify-between font-semibold text-brand-400">
+                <div className="flex items-center gap-1.5">
+                  <Mail className="w-4 h-4 shrink-0" />
+                  <span>Entrega de E-mail</span>
+                </div>
+                {onOpenSettings && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenSettings('email');
+                    }}
+                    className="text-[11px] text-brand-400 hover:underline font-normal"
+                  >
+                    Configurar Provedor &rarr;
+                  </button>
+                )}
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                {emailConfig.provider !== 'simulated' ? (
+                  <>
+                    Enviamos o código para <strong>{email}</strong> via {emailConfig.provider.toUpperCase()}. Se não encontrar na Caixa de Entrada em instantes, confira a pasta de <strong>Spam / Lixo Eletrônico</strong>.
+                  </>
+                ) : (
+                  <>
+                    Como o site está em hospedagem estática no GitHub Pages, para que os e-mails cheguem no seu Gmail você pode conectar o <strong>Google Apps Script</strong> (100% grátis) ou <strong>Brevo</strong> nas Configurações.
+                  </>
+                )}
+              </p>
             </div>
 
             <div className="space-y-3 pt-2">

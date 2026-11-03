@@ -30,7 +30,7 @@ export function MainLayout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
 
   // Auth Modal states
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -206,6 +206,10 @@ export function MainLayout() {
         resetToken={resetTokenParam}
         onSuccess={() => {
           loadNotes();
+        }}
+        onOpenSettings={(tab) => {
+          if (tab) setSettingsInitialTab(tab);
+          setIsSettingsModalOpen(true);
         }}
       />
 

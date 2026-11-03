@@ -51,3 +51,16 @@ export interface DispatchedEmail {
   sent_at: string;
 }
 
+export type EmailProviderType = 'resend' | 'brevo' | 'webhook' | 'simulated';
+
+export interface EmailProviderConfig {
+  provider: EmailProviderType;
+  resendApiKey?: string;
+  resendFromEmail?: string;
+  brevoApiKey?: string;
+  brevoSenderEmail?: string;
+  brevoSenderName?: string;
+  webhookUrl?: string;
+}
+
+

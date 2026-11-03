@@ -11,13 +11,14 @@ import {
   User,
   LogOut,
   ChevronDown,
-  Sparkles
+  Sparkles,
+  Mail
 } from 'lucide-react';
 import { exportNotesToJson } from '../../lib/exportImport';
 
 interface NavbarProps {
   onToggleMobileSidebar: () => void;
-  onOpenSettings: (tab?: 'account' | 'editor' | 'cloud' | 'security' | 'backup') => void;
+  onOpenSettings: (tab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup') => void;
   onOpenAuthModal: () => void;
   totalNotes: number;
 }
@@ -153,6 +154,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <User className="w-3.5 h-3.5 text-brand-400" />
                     <span>Minha Conta</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDropdownOpen(false);
+                      onOpenSettings('email');
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1a1d28] rounded-xl transition-colors text-left"
+                  >
+                    <Mail className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Serviço de E-mail</span>
                   </button>
                   <button
                     type="button"
