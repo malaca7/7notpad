@@ -1,9 +1,11 @@
 import type { Note, NoteShare } from '../types/note';
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { getOrCreateOwnerToken } from './crypto';
+import { parsePortablePayload, decryptContent, type PortableNoteData } from './portableShare';
 
 const LOCAL_STORAGE_NOTES_KEY = '7notpad_notes';
 const LOCAL_STORAGE_SHARES_KEY = '7notpad_shares';
+const PORTABLE_CACHE_KEY = '7notpad_portable_cache_';
 
 // Initial starter note with helpful tips
 const WELCOME_NOTE_HTML = `
@@ -26,7 +28,6 @@ export function getLocalNotes(): Note[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_NOTES_KEY);
     if (!raw) {
-      // First access: generate default welcome note
       const token = getOrCreateOwnerToken();
       const defaultNote: Note = {
         id: crypto.randomUUID(),
@@ -75,8 +76,11 @@ export function saveLocalShares(shares: Record<string, NoteShare>): void {
   }
 }
 
+// Temporary in-memory cache for decrypted portable data
+let activePortableData: (PortableNoteData & { slug: string }) | null = null;
+
 /**
- * Storage Service: combines Local-First with Supabase Cloud Sync
+ * Storage Service: combines Local-First with Supabase Cloud Sync and Portable Links
  */
 export const StorageService = {
   // Fetch all notes for current owner
@@ -92,7 +96,6 @@ export const StorageService = {
     if (!supabase) return localNotes;
 
     try {
-      // Fetch notes from Supabase
       const { data: remoteNotes, error: notesError } = await supabase
         .from('notes')
         .select(`
@@ -109,7 +112,6 @@ export const StorageService = {
       }
 
       if (remoteNotes && remoteNotes.length > 0) {
-        // Map to Note structure
         const mappedNotes: Note[] = remoteNotes.map(n => ({
           id: n.id,
           local_id: n.local_id || n.id,
@@ -127,7 +129,6 @@ export const StorageService = {
         saveLocalNotes(mappedNotes);
         return mappedNotes;
       } else if (localNotes.length > 0) {
-        // Sync local notes to Supabase for the first time
         for (const localNote of localNotes) {
           await this.saveNote(localNote);
         }
@@ -142,7 +143,6 @@ export const StorageService = {
 
   // Save or update note
   async saveNote(note: Note): Promise<{ success: boolean; remoteId?: string }> {
-    // 1. Always update local storage first (instant responsiveness)
     const localNotes = getLocalNotes();
     const existingIndex = localNotes.findIndex(n => n.id === note.id || n.local_id === note.local_id);
     
@@ -153,7 +153,6 @@ export const StorageService = {
     }
     saveLocalNotes(localNotes);
 
-    // 2. If Supabase configured, push to cloud
     if (isSupabaseConfigured()) {
       const supabase = getSupabase();
       if (supabase) {
@@ -190,11 +189,9 @@ export const StorageService = {
 
   // Delete note
   async deleteNote(noteId: string): Promise<boolean> {
-    // 1. Remove from local storage
     const localNotes = getLocalNotes().filter(n => n.id !== noteId && n.local_id !== noteId);
     saveLocalNotes(localNotes);
 
-    // Also remove any local shares
     const shares = getLocalShares();
     const updatedShares = { ...shares };
     let shareRemoved = false;
@@ -208,21 +205,15 @@ export const StorageService = {
       saveLocalShares(updatedShares);
     }
 
-    // 2. Remove from Supabase if configured
     if (isSupabaseConfigured()) {
       const supabase = getSupabase();
       if (supabase) {
         try {
-          const { error } = await supabase
+          await supabase
             .from('notes')
             .delete()
             .eq('id', noteId)
             .eq('owner_token', getOrCreateOwnerToken());
-
-          if (error) {
-            console.error('Supabase delete error:', error);
-            return false;
-          }
         } catch (err) {
           console.error('Supabase network error deleting note:', err);
           return false;
@@ -235,12 +226,10 @@ export const StorageService = {
 
   // Save / Update Share
   async saveShare(share: NoteShare): Promise<{ success: boolean; error?: string }> {
-    // Local storage persistence
     const localShares = getLocalShares();
     localShares[share.custom_slug] = share;
     saveLocalShares(localShares);
 
-    // Update note reference locally
     const localNotes = getLocalNotes();
     const note = localNotes.find(n => n.id === share.note_id);
     if (note) {
@@ -252,7 +241,6 @@ export const StorageService = {
       const supabase = getSupabase();
       if (supabase) {
         try {
-          // Check slug conflict
           const { data: existingShare } = await supabase
             .from('note_shares')
             .select('id, note_id')
@@ -260,7 +248,7 @@ export const StorageService = {
             .single();
 
           if (existingShare && existingShare.note_id !== share.note_id) {
-            return { success: false, error: 'Este link já está em uso por outra nota. Escolha um nome diferente.' };
+            return { success: false, error: 'Este link já está em uso por outra nota no Supabase. Escolha um nome diferente.' };
           }
 
           const { error } = await supabase
@@ -321,13 +309,11 @@ export const StorageService = {
 
   // Check if a custom slug is already in use
   async isSlugTaken(slug: string, currentNoteId: string): Promise<boolean> {
-    // 1. Check local shares
     const localShares = getLocalShares();
     if (localShares[slug] && localShares[slug].note_id !== currentNoteId) {
       return true;
     }
 
-    // 2. Check Supabase
     if (isSupabaseConfigured()) {
       const supabase = getSupabase();
       if (supabase) {
@@ -356,8 +342,81 @@ export const StorageService = {
     share?: NoteShare;
     note?: Partial<Note>;
     error?: string;
+    isCloudConfigured?: boolean;
+    isPortable?: boolean;
   }> {
-    // Check Supabase first if configured
+    // 1. Check if there is a portable payload in URL hash or query string
+    const hash = window.location.hash;
+    const search = window.location.search;
+    const portableData = await parsePortablePayload(hash || search);
+
+    if (portableData) {
+      activePortableData = { ...portableData, slug };
+      // Save in cache so it persists on refresh
+      try {
+        sessionStorage.setItem(PORTABLE_CACHE_KEY + slug, JSON.stringify(portableData));
+      } catch {}
+
+      const isProtected = Boolean(portableData.is_password_protected);
+      return {
+        found: true,
+        isPortable: true,
+        share: {
+          id: 'portable_' + slug,
+          note_id: 'portable_' + slug,
+          custom_slug: slug,
+          is_password_protected: isProtected,
+          password_salt: portableData.password_salt,
+          password_hash: portableData.password_hash,
+          is_active: true,
+          created_at: portableData.created_at,
+          updated_at: portableData.updated_at,
+        },
+        note: {
+          id: 'portable_' + slug,
+          title: portableData.title,
+          content: isProtected ? '' : (portableData.content || ''),
+          created_at: portableData.created_at,
+          updated_at: portableData.updated_at,
+          attachments: portableData.attachments as any,
+        }
+      };
+    }
+
+    // 2. Check session storage cache for portable data
+    try {
+      const cachedRaw = sessionStorage.getItem(PORTABLE_CACHE_KEY + slug);
+      if (cachedRaw) {
+        const cached = JSON.parse(cachedRaw) as PortableNoteData;
+        activePortableData = { ...cached, slug };
+        const isProtected = Boolean(cached.is_password_protected);
+        return {
+          found: true,
+          isPortable: true,
+          share: {
+            id: 'portable_' + slug,
+            note_id: 'portable_' + slug,
+            custom_slug: slug,
+            is_password_protected: isProtected,
+            password_salt: cached.password_salt,
+            password_hash: cached.password_hash,
+            is_active: true,
+            created_at: cached.created_at,
+            updated_at: cached.updated_at,
+          },
+          note: {
+            id: 'portable_' + slug,
+            title: cached.title,
+            content: isProtected ? '' : (cached.content || ''),
+            created_at: cached.created_at,
+            updated_at: cached.updated_at,
+            attachments: cached.attachments as any,
+          }
+        };
+      }
+    } catch {}
+
+    // 3. Check Supabase if configured
     if (isSupabaseConfigured()) {
       const supabase = getSupabase();
       if (supabase) {
@@ -372,12 +431,11 @@ export const StorageService = {
             .eq('is_active', true)
             .single();
 
-          if (shareError || !shareData) {
-            // Check local fallback
-          } else {
+          if (!shareError && shareData) {
             const noteData = shareData.notes as any;
             return {
               found: true,
+              isCloudConfigured: true,
               share: {
                 id: shareData.id,
                 note_id: shareData.note_id,
@@ -392,7 +450,6 @@ export const StorageService = {
               note: {
                 id: noteData?.id,
                 title: noteData?.title || 'Sem título',
-                // If password protected, do NOT expose content yet!
                 content: shareData.is_password_protected ? '' : (noteData?.content || ''),
                 created_at: noteData?.created_at,
                 updated_at: noteData?.updated_at
@@ -405,7 +462,7 @@ export const StorageService = {
       }
     }
 
-    // Local shares fallback
+    // 4. Local shares fallback (same browser)
     const localShares = getLocalShares();
     const share = localShares[slug];
     if (share && share.is_active) {
@@ -418,7 +475,6 @@ export const StorageService = {
           note: {
             id: note.id,
             title: note.title,
-            // If password protected, content will only be revealed upon password verification
             content: share.is_password_protected ? '' : note.content,
             created_at: note.created_at,
             updated_at: note.updated_at,
@@ -428,12 +484,36 @@ export const StorageService = {
       }
     }
 
-    return { found: false, error: 'Nota não encontrada ou link desativado.' };
+    return { 
+      found: false, 
+      error: 'Nota não encontrada.',
+      isCloudConfigured: isSupabaseConfigured()
+    };
   },
 
   // Retrieve protected content after valid password verification
-  async unlockProtectedNoteContent(slug: string): Promise<string | null> {
-    // 1. Supabase
+  async unlockProtectedNoteContent(slug: string, passwordInput?: string): Promise<string | null> {
+    // 1. Check portable data with AES decryption
+    if (activePortableData && activePortableData.slug === slug) {
+      if (activePortableData.encrypted_content && activePortableData.encryption_iv && passwordInput && activePortableData.password_salt) {
+        try {
+          return await decryptContent(
+            activePortableData.encrypted_content,
+            activePortableData.encryption_iv,
+            passwordInput,
+            activePortableData.password_salt
+          );
+        } catch (err) {
+          console.error('Failed to decrypt portable content:', err);
+          return null;
+        }
+      }
+      if (activePortableData.content) {
+        return activePortableData.content;
+      }
+    }
+
+    // 2. Supabase
     if (isSupabaseConfigured()) {
       const supabase = getSupabase();
       if (supabase) {
@@ -453,7 +533,7 @@ export const StorageService = {
       }
     }
 
-    // 2. Local fallback
+    // 3. Local fallback
     const localShares = getLocalShares();
     const share = localShares[slug];
     if (share) {

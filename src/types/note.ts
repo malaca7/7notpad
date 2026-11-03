@@ -44,3 +44,4 @@ export interface EditorSettings {
   editorWidth: 'narrow' | 'normal' | 'wide' | 'full';
   lineSpacing: 'compact' | 'normal' | 'relaxed';
 }
+

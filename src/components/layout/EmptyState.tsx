@@ -115,3 +115,4 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onCreateNote }) => {
     </div>
   );
 };
+

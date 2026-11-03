@@ -49,3 +49,4 @@ export const BrowserWarningBanner: React.FC = () => {
     </div>
   );
 };
+

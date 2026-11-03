@@ -62,3 +62,4 @@ export function clearSupabaseCredentials(): void {
   localStorage.removeItem(STORAGE_KEY_KEY);
   cachedClient = null;
 }
+

@@ -3,11 +3,12 @@ import { Modal } from '../common/Modal';
 import type { Note, NoteShare } from '../../types/note';
 import { StorageService } from '../../lib/storage';
 import { generateSalt, hashPassword, generateRandomSlug, slugify } from '../../lib/crypto';
+import { generatePortablePayload } from '../../lib/portableShare';
+import { isSupabaseConfigured } from '../../lib/supabase';
 import { useToast } from '../common/Toast';
 import confetti from 'canvas-confetti';
 import { 
   Share2, 
-  Link as LinkIcon, 
   Lock, 
   Copy, 
   Check, 
@@ -16,7 +17,9 @@ import {
   Sparkles, 
   Eye, 
   EyeOff, 
-  AlertCircle 
+  AlertCircle,
+  Globe,
+  Cloud
 } from 'lucide-react';
 
 interface ShareModalProps {
@@ -33,6 +36,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   onShareUpdated,
 }) => {
   const { success, error } = useToast();
+  const hasCloud = isSupabaseConfigured();
 
   const [isActive, setIsActive] = useState<boolean>(note.share?.is_active ?? false);
   const [slug, setSlug] = useState<string>(note.share?.custom_slug || '');
@@ -41,9 +45,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   );
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
+  const [copiedType, setCopiedType] = useState<'portable' | 'short' | null>(null);
   const [isSlugConflict, setIsSlugConflict] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [portableHash, setPortableHash] = useState<string>('');
+  const [linkMode, setLinkMode] = useState<'portable' | 'short'>(hasCloud ? 'short' : 'portable');
 
   // Sync state when modal opens or note changes
   useEffect(() => {
@@ -55,16 +61,43 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         setPassword('');
       } else {
         setIsActive(false);
-        // Default slug from title or random
         const initialSlug = note.title.trim() ? slugify(note.title) : generateRandomSlug('nota');
         setSlug(initialSlug || generateRandomSlug('nota'));
         setIsPasswordProtected(false);
         setPassword('');
       }
       setIsSlugConflict(false);
-      setCopied(false);
+      setCopiedType(null);
+      setLinkMode(hasCloud ? 'short' : 'portable');
     }
-  }, [isOpen, note]);
+  }, [isOpen, note, hasCloud]);
+
+  // Generate portable hash whenever note, share, or password changes
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const computeHash = async () => {
+      try {
+        const dummyShare: NoteShare = {
+          id: note.share?.id || 'temp',
+          note_id: note.id,
+          custom_slug: slugify(slug) || 'nota',
+          is_password_protected: isPasswordProtected,
+          password_salt: note.share?.password_salt || (isPasswordProtected ? 'salt' : undefined),
+          password_hash: note.share?.password_hash,
+          is_active: true,
+          created_at: note.created_at,
+          updated_at: note.updated_at,
+        };
+        const hash = await generatePortablePayload(note, dummyShare, password);
+        setPortableHash(hash);
+      } catch (err) {
+        console.error('Error computing portable payload:', err);
+      }
+    };
+
+    computeHash();
+  }, [isOpen, note, slug, isPasswordProtected, password]);
 
   // Check slug availability when slug changes
   useEffect(() => {
@@ -93,26 +126,40 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setSlug(newSlug);
   };
 
-  const getPublicUrl = () => {
-    const cleanSlug = slugify(slug) || 'slug';
+  const getBaseUrl = () => {
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
     const origin = window.location.origin;
     const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+    const cleanSlug = slugify(slug) || 'slug';
     return `${origin}${cleanBase}/n/${cleanSlug}`;
   };
 
-  const handleCopyLink = async () => {
-    const url = getPublicUrl();
+  const getPortableUrl = () => {
+    const base = getBaseUrl();
+    return portableHash ? `${base}#d=${portableHash}` : base;
+  };
+
+  const getShortUrl = () => {
+    return getBaseUrl();
+  };
+
+  const handleCopyLink = async (type: 'portable' | 'short') => {
+    const url = type === 'portable' ? getPortableUrl() : getShortUrl();
     try {
       await navigator.clipboard.writeText(url);
-      setCopied(true);
+      setCopiedType(type);
       confetti({
         particleCount: 40,
         spread: 60,
         origin: { y: 0.8 }
       });
-      success('Link copiado!', 'O link público foi copiado para a área de transferência.');
-      setTimeout(() => setCopied(false), 2500);
+      success(
+        'Link copiado com sucesso!',
+        type === 'portable'
+          ? 'Link Universal Portátil pronto para abrir em qualquer navegador ou celular.'
+          : 'Link curto copiado.'
+      );
+      setTimeout(() => setCopiedType(null), 2500);
     } catch {
       error('Erro ao copiar link', 'Não foi possível copiar automaticamente.');
     }
@@ -140,7 +187,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       let salt = note.share?.password_salt;
       let hash = note.share?.password_hash;
 
-      // If user typed a new password or changed password
       if (isPasswordProtected) {
         if (password.trim()) {
           salt = generateSalt();
@@ -171,12 +217,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         return;
       }
 
+      // Recompute portable hash with actual final share
+      const newHash = await generatePortablePayload(note, shareData, password);
+      setPortableHash(newHash);
+
       onShareUpdated(shareData);
       success(
         isActive ? 'Compartilhamento ativado!' : 'Compartilhamento salvo',
         `Acesse pelo identificador /n/${cleanSlug}`
       );
-      onClose();
     } catch (err: any) {
       error('Erro ao salvar compartilhamento', err.message);
     } finally {
@@ -245,7 +294,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           </label>
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-brand-500/50">
-              <span className="text-xs text-gray-400 select-none pr-1">
+              <span className="text-xs text-gray-400 select-none pr-1 truncate max-w-[170px] sm:max-w-none">
                 {window.location.host}{((import.meta as any).env?.BASE_URL || '/').replace(/\/+$/, '')}/n/
               </span>
               <input
@@ -316,7 +365,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 </button>
               </div>
               <p className="text-[11px] text-gray-500 mt-1.5">
-                🔒 A senha é criptografada com salt criptográfico SHA-256 e nunca exposta em texto puro.
+                🔒 A senha é protegida com criptografia segura SHA-256 e AES-GCM.
               </p>
             </div>
           )}
@@ -324,30 +373,81 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
         {/* Copy Link Preview Section */}
         {isActive && (
-          <div className="p-3 rounded-xl bg-brand-500/5 border border-brand-500/20 space-y-2">
-            <div className="text-xs font-semibold text-brand-400 flex items-center gap-1.5">
-              <LinkIcon className="w-3.5 h-3.5" />
-              Link público gerado:
+          <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/25 space-y-3">
+            {/* Link Mode Selector */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                <Globe className="w-4 h-4 text-brand-400" />
+                Opções de Link para Envio:
+              </span>
+
+              <div className="flex bg-gray-100 dark:bg-[#14161f] p-0.5 rounded-lg border border-gray-200 dark:border-[#232838] text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setLinkMode('portable')}
+                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                    linkMode === 'portable'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-100'
+                  }`}
+                >
+                  Link Universal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLinkMode('short')}
+                  className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                    linkMode === 'short'
+                      ? 'bg-brand-600 text-white shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900 dark:hover:text-gray-100'
+                  }`}
+                >
+                  Link Curto
+                </button>
+              </div>
             </div>
+
+            {/* Description of current mode */}
+            {linkMode === 'portable' ? (
+              <p className="text-xs text-brand-400 dark:text-brand-300 leading-relaxed">
+                ✨ <strong>Link Universal Portátil:</strong> Funciona <strong>instantaneamente em qualquer navegador e celular</strong> sem depender de banco de dados ou login.
+              </p>
+            ) : (
+              <div className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                {hasCloud ? (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <Cloud className="w-3.5 h-3.5" />
+                    Sincronizado na Nuvem Supabase. Funciona em qualquer navegador.
+                  </span>
+                ) : (
+                  <span className="text-amber-400 flex items-start gap-1.5">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>Nuvem Supabase não configurada. Para que o link curto funcione em outros navegadores, use o <strong>Link Universal</strong> ou conecte o Supabase nas configurações.</span>
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* URL Box */}
             <div className="flex items-center gap-2">
               <input
                 readOnly
-                value={getPublicUrl()}
-                className="flex-1 bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-lg px-3 py-2 text-xs text-gray-700 dark:text-gray-300 font-mono outline-none"
+                value={linkMode === 'portable' ? getPortableUrl() : getShortUrl()}
+                className="flex-1 bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2 text-xs text-gray-700 dark:text-gray-300 font-mono outline-none truncate"
               />
               <button
                 type="button"
-                onClick={handleCopyLink}
-                className="flex items-center gap-1.5 px-3 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-xs font-medium transition-colors shadow-sm"
+                onClick={() => handleCopyLink(linkMode)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm shrink-0"
               >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? 'Copiado!' : 'Copiar'}
+                {copiedType === linkMode ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                {copiedType === linkMode ? 'Copiado!' : 'Copiar Link'}
               </button>
               <a
-                href={getPublicUrl()}
+                href={linkMode === 'portable' ? getPortableUrl() : getShortUrl()}
                 target="_blank"
                 rel="noreferrer"
-                className="p-2 border border-gray-200 dark:border-[#232838] bg-white dark:bg-[#11131a] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-600 dark:text-gray-300 rounded-lg transition-colors"
+                className="p-2 border border-gray-200 dark:border-[#232838] bg-white dark:bg-[#11131a] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-600 dark:text-gray-300 rounded-xl transition-colors shrink-0"
                 title="Abrir página pública"
               >
                 <ExternalLink className="w-4 h-4" />
@@ -377,15 +477,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               onClick={onClose}
               className="px-4 py-2 rounded-xl border border-gray-200 dark:border-[#232838] text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#181b24] transition-colors"
             >
-              Cancelar
+              Fechar
             </button>
             <button
               type="button"
               onClick={handleSaveShare}
               disabled={isSaving || isSlugConflict}
-              className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-xs font-medium shadow-md shadow-brand-600/20 transition-all flex items-center gap-2"
+              className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white text-xs font-semibold shadow-md shadow-brand-600/20 transition-all flex items-center gap-2"
             >
-              {isSaving ? 'Salvando...' : 'Salvar Compartilhamento'}
+              {isSaving ? 'Salvando...' : 'Salvar Alterações'}
             </button>
           </div>
         </div>

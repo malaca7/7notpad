@@ -16,7 +16,8 @@ import {
   ShieldAlert, 
   Sparkles,
   Sun,
-  Moon
+  Moon,
+  Info
 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 
@@ -122,8 +123,8 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       );
 
       if (isValid) {
-        // Unlock content!
-        const fullContent = await StorageService.unlockProtectedNoteContent(slug);
+        // Unlock content (with passwordInput passed for AES decryption if portable)
+        const fullContent = await StorageService.unlockProtectedNoteContent(slug, passwordInput);
         setContent(fullContent || '<p>Nota desbloqueada com sucesso.</p>');
         setIsLocked(false);
         setAttempts(0);
@@ -148,7 +149,6 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
 
   const handleCopyContent = async () => {
     try {
-      // Strip html for plain text clipboard or copy HTML
       const tempEl = document.createElement('div');
       tempEl.innerHTML = content;
       const plainText = tempEl.textContent || tempEl.innerText || '';
@@ -175,18 +175,34 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   if (notFound) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 p-4">
-        <div className="max-w-md w-full text-center space-y-4 p-8 rounded-2xl bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] shadow-xl">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center">
+        <div className="max-w-md w-full text-center space-y-5 p-8 rounded-3xl bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] shadow-2xl">
+          <div className="w-16 h-16 mx-auto rounded-3xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20">
             <ShieldAlert className="w-8 h-8" />
           </div>
-          <h1 className="text-2xl font-bold">Nota Não Encontrada</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            O link <code className="text-brand-400 font-mono">/n/{slug}</code> não existe ou o compartilhamento foi desativado pelo proprietário.
-          </p>
-          <div className="pt-2">
+          
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              Nota Não Encontrada
+            </h1>
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              O link <code className="text-brand-400 font-mono bg-brand-500/10 px-1.5 py-0.5 rounded">/n/{slug}</code> não foi localizado neste navegador.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20 text-left text-xs text-gray-600 dark:text-gray-300 space-y-2">
+            <div className="font-semibold text-brand-400 flex items-center gap-1.5">
+              <Info className="w-4 h-4 shrink-0" />
+              Por que isso acontece?
+            </div>
+            <p className="leading-relaxed opacity-90">
+              Se esta nota foi criada em outro navegador ou celular, você deve utilizar o <strong>Link Universal</strong> (o link completo gerado pelo botão Compartilhar do 7NotPad) ou ativar a <strong>Nuvem Supabase</strong> nas configurações para links curtos.
+            </p>
+          </div>
+
+          <div className="pt-1">
             <button
               onClick={onGoHome}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors shadow-lg shadow-brand-600/20"
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-brand-600/20"
             >
               <ArrowLeft className="w-4 h-4" />
               Acessar 7NotPad
@@ -354,9 +370,9 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
                           <div className="text-[10px] text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</div>
                         </div>
                       </div>
-                      {att.data_url || att.storage_path ? (
+                      {att.data_url ? (
                         <a
-                          href={att.data_url || att.storage_path}
+                          href={att.data_url}
                           download={att.file_name}
                           className="p-2 text-gray-500 hover:text-brand-400 transition-colors"
                           title="Baixar arquivo"

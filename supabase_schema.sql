@@ -142,3 +142,4 @@ BEGIN
     AND s.is_active = TRUE;
 END;
 $$;
+
