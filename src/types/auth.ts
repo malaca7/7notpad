@@ -50,3 +50,4 @@ export interface DispatchedEmail {
   purpose: VerificationPurpose | 'password_reset_link';
   sent_at: string;
 }
+

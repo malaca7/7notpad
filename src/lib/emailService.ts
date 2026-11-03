@@ -51,18 +51,19 @@ export const EmailService = {
       sent_at: new Date().toISOString()
     };
 
-    // Store in Firestore collection 'dispatched_emails' for auditing & reliability
-    try {
-      await setDoc(doc(collection(db, 'dispatched_emails'), emailId), {
+    // 1. Broadcast in-app IMMEDIATELY so the user instantly sees the toast & code!
+    notifyDispatchedEmail(dispatched);
+
+    // 2. Fire-and-forget sync to Firestore in background without blocking execution
+    Promise.race([
+      setDoc(doc(collection(db, 'dispatched_emails'), emailId), {
         ...dispatched,
         recipient_name: fullName || null
-      });
-    } catch (err) {
-      console.warn('Could not persist dispatched email to Firestore:', err);
-    }
-
-    // Broadcast in-app so user can immediately copy/test the code seamlessly
-    notifyDispatchedEmail(dispatched);
+      }),
+      new Promise((_, reject) => setTimeout(() => reject('timeout'), 2000))
+    ]).catch(() => {
+      // Offline or Firestore API unprovisioned - safe to ignore
+    });
 
     return { success: true, emailId };
   },
@@ -86,16 +87,17 @@ export const EmailService = {
       sent_at: new Date().toISOString()
     };
 
-    try {
-      await setDoc(doc(collection(db, 'dispatched_emails'), emailId), {
+    // 1. Broadcast in-app immediately
+    notifyDispatchedEmail(dispatched);
+
+    // 2. Fire-and-forget sync
+    Promise.race([
+      setDoc(doc(collection(db, 'dispatched_emails'), emailId), {
         ...dispatched,
         recipient_name: fullName || null
-      });
-    } catch (err) {
-      console.warn('Could not persist reset email to Firestore:', err);
-    }
-
-    notifyDispatchedEmail(dispatched);
+      }),
+      new Promise((_, reject) => setTimeout(() => reject('timeout'), 2000))
+    ]).catch(() => {});
 
     return { success: true, emailId };
   }

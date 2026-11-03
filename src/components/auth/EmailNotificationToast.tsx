@@ -106,3 +106,4 @@ export const EmailNotificationToast: React.FC = () => {
     </div>
   );
 };
+

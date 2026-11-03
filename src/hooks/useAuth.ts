@@ -30,3 +30,4 @@ export function useAuth() {
     logout: () => AuthService.logout()
   };
 }
+

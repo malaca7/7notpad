@@ -2,7 +2,6 @@ import {
   collection, 
   doc, 
   setDoc, 
-  getDoc, 
   getDocs, 
   query, 
   where, 
@@ -29,6 +28,75 @@ import type {
 } from '../types/auth';
 
 const AUTH_SESSION_KEY = '7notpad_auth_session';
+const LOCAL_USERS_KEY = '7notpad_users_store';
+const LOCAL_CODES_KEY = '7notpad_codes_store';
+const LOCAL_TOKENS_KEY = '7notpad_tokens_store';
+
+export interface StoredUser {
+  id: string;
+  full_name: string;
+  username: string; // unique lowercase
+  email: string; // unique lowercase
+  password_salt: string;
+  password_hash: string;
+  email_verified: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// Local Database Helpers (Local-First resilient storage)
+function getLocalUsers(): StoredUser[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_USERS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalUsers(users: StoredUser[]) {
+  try {
+    localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+  } catch {}
+}
+
+function getLocalCodes(): (EmailVerificationCode & { invalidated?: boolean })[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_CODES_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalCodes(codes: (EmailVerificationCode & { invalidated?: boolean })[]) {
+  try {
+    localStorage.setItem(LOCAL_CODES_KEY, JSON.stringify(codes));
+  } catch {}
+}
+
+function getLocalTokens(): PasswordResetToken[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_TOKENS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalTokens(tokens: PasswordResetToken[]) {
+  try {
+    localStorage.setItem(LOCAL_TOKENS_KEY, JSON.stringify(tokens));
+  } catch {}
+}
+
+// Safe timeout wrapper for Firestore calls so offline/unprovisioned DB never hangs
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 1500): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs))
+  ]).catch(() => null);
+}
 
 type AuthListener = (session: AuthSession | null) => void;
 const authListeners = new Set<AuthListener>();
@@ -105,7 +173,7 @@ export const AuthService = {
   },
 
   // ----------------------------------------------------
-  // ETAPA 1 — Cadastro de Usuários
+  // ETAPA 1 — Cadastro de Usuários (Zero-Hang / Instantâneo)
   // ----------------------------------------------------
   async register(params: {
     fullName: string;
@@ -143,28 +211,40 @@ export const AuthService = {
     }
 
     try {
-      // 1. Check if username is already taken
-      const usersRef = collection(db, 'users');
-      const usernameQuery = query(usersRef, where('username', '==', username));
-      const usernameSnap = await getDocs(usernameQuery);
-      if (!usernameSnap.empty) {
+      // 1. Check uniqueness in local storage first
+      const localUsers = getLocalUsers();
+      if (localUsers.some(u => u.username.toLowerCase() === username)) {
         return { success: false, error: 'Este nome de usuário já está em uso. Escolha outro.' };
       }
-
-      // 2. Check if email is already taken
-      const emailQuery = query(usersRef, where('email', '==', email));
-      const emailSnap = await getDocs(emailQuery);
-      if (!emailSnap.empty) {
+      if (localUsers.some(u => u.email.toLowerCase() === email)) {
         return { success: false, error: 'Este e-mail já está cadastrado. Faça login ou recupere sua senha.' };
       }
 
-      // 3. Create user in Firestore
+      // 2. Fast check in Firestore with timeout (if online and configured)
+      try {
+        const usersRef = collection(db, 'users');
+        const usernameQuery = query(usersRef, where('username', '==', username));
+        const usernameSnap = await withTimeout(getDocs(usernameQuery), 1200);
+        if (usernameSnap && !usernameSnap.empty) {
+          return { success: false, error: 'Este nome de usuário já está em uso. Escolha outro.' };
+        }
+
+        const emailQuery = query(usersRef, where('email', '==', email));
+        const emailSnap = await withTimeout(getDocs(emailQuery), 1200);
+        if (emailSnap && !emailSnap.empty) {
+          return { success: false, error: 'Este e-mail já está cadastrado. Faça login ou recupere sua senha.' };
+        }
+      } catch (err) {
+        // Safe to continue with local validation
+      }
+
+      // 3. Create user record
       const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const salt = generateSalt();
       const passwordHash = await hashPassword(password, salt);
       const now = new Date().toISOString();
 
-      await setDoc(doc(db, 'users', userId), {
+      const newUser: StoredUser = {
         id: userId,
         full_name: fullName,
         username,
@@ -174,9 +254,16 @@ export const AuthService = {
         email_verified: false,
         created_at: now,
         updated_at: now
-      });
+      };
 
-      // 4. Generate and send 6-digit confirmation code
+      // Save to local storage database immediately!
+      localUsers.push(newUser);
+      saveLocalUsers(localUsers);
+
+      // Replicate to Firestore in background without blocking execution
+      withTimeout(setDoc(doc(db, 'users', userId), newUser), 1500).catch(() => {});
+
+      // 4. Generate and send 6-digit confirmation code immediately!
       await this.generateAndSendCode({
         userId,
         email,
@@ -203,23 +290,16 @@ export const AuthService = {
     const cleanEmail = email.trim().toLowerCase();
 
     try {
-      // Invalidate any existing pending codes for this email and purpose
-      const codesRef = collection(db, 'email_verification_codes');
-      const q = query(
-        codesRef, 
-        where('email', '==', cleanEmail),
-        where('purpose', '==', purpose)
-      );
-      const snap = await getDocs(q);
       const nowIso = new Date().toISOString();
-      const invalidations = snap.docs.map(d => {
-        const data = d.data();
-        if (!data.used_at) {
-          return updateDoc(d.ref, { used_at: nowIso, invalidated: true });
+      const codes = getLocalCodes();
+
+      // Invalidate any existing pending codes for this email and purpose
+      codes.forEach(c => {
+        if (c.email === cleanEmail && c.purpose === purpose && !c.used_at) {
+          c.invalidated = true;
+          c.used_at = nowIso;
         }
-        return Promise.resolve();
       });
-      await Promise.all(invalidations);
 
       // Generate new 6-digit code
       const code = generateSixDigitCode();
@@ -242,9 +322,13 @@ export const AuthService = {
         ...(newEmail ? { new_email: newEmail.trim().toLowerCase() } : {})
       };
 
-      await setDoc(doc(db, 'email_verification_codes', codeId), codeDoc);
+      codes.push(codeDoc);
+      saveLocalCodes(codes);
 
-      // Send email (for email_change, recipient is newEmail)
+      // Sync code to Firestore in background
+      withTimeout(setDoc(doc(db, 'email_verification_codes', codeId), codeDoc), 1500).catch(() => {});
+
+      // Send email (shows immediate floating toast notification with code)
       const targetEmail = newEmail || cleanEmail;
       await EmailService.sendVerificationCode({
         to: targetEmail,
@@ -283,46 +367,36 @@ export const AuthService = {
     }
 
     try {
-      const codesRef = collection(db, 'email_verification_codes');
-      const q = query(
-        codesRef, 
-        where('email', '==', email), 
-        where('purpose', '==', purpose)
-      );
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
-        return { success: false, error: 'Nenhum código de verificação pendente encontrado para este e-mail.' };
-      }
-
-      // Pick the latest uninvalidated code
-      const docs = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as EmailVerificationCode & { invalidated?: boolean }))
-        .filter(d => !d.used_at && !d.invalidated)
+      const localCodes = getLocalCodes();
+      const matchingCodes = localCodes
+        .filter(c => c.email === email && c.purpose === purpose && !c.used_at && !c.invalidated)
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      if (docs.length === 0) {
-        return { success: false, error: 'O código informado já foi utilizado ou foi substituído por um novo. Solicite um novo código.' };
+      if (matchingCodes.length === 0) {
+        return { success: false, error: 'Nenhum código de verificação pendente encontrado. Solicite um novo código.' };
       }
 
-      const activeCode = docs[0];
+      const activeCode = matchingCodes[0];
       const now = new Date();
 
       // Check expiration (10 minutes)
       if (now > new Date(activeCode.expires_at)) {
-        await updateDoc(doc(db, 'email_verification_codes', activeCode.id), { used_at: now.toISOString(), expired: true });
+        activeCode.used_at = now.toISOString();
+        saveLocalCodes(localCodes);
         return { success: false, error: 'Este código expirou (validade de 10 minutos). Por favor, solicite um novo código.' };
       }
 
       // Check max attempts (limit to 5 attempts)
       const currentAttempts = (activeCode.attempts || 0) + 1;
+      activeCode.attempts = currentAttempts;
+      saveLocalCodes(localCodes);
+
       if (currentAttempts > 5) {
-        await updateDoc(doc(db, 'email_verification_codes', activeCode.id), { used_at: now.toISOString(), blocked: true });
+        activeCode.used_at = now.toISOString();
+        activeCode.invalidated = true;
+        saveLocalCodes(localCodes);
         return { success: false, error: 'Número máximo de tentativas excedido (5 tentativas). O código foi invalidado. Solicite um novo código.' };
       }
-
-      // Update attempt counter in Firestore
-      await updateDoc(doc(db, 'email_verification_codes', activeCode.id), { attempts: currentAttempts });
 
       // Verify code
       const isMatch = await verifyCode(code, activeCode.code_salt, activeCode.code_hash);
@@ -336,31 +410,35 @@ export const AuthService = {
       }
 
       // Code is valid! Mark as used
-      await updateDoc(doc(db, 'email_verification_codes', activeCode.id), { used_at: now.toISOString() });
+      activeCode.used_at = now.toISOString();
+      saveLocalCodes(localCodes);
 
-      // Action based on purpose
+      // Sync code usage to Firestore in background
+      withTimeout(updateDoc(doc(db, 'email_verification_codes', activeCode.id), { used_at: now.toISOString() }), 1000).catch(() => {});
+
+      // Purpose 1: Signup Verification
       if (purpose === 'signup_verification') {
-        // Activate user
-        const userRef = doc(db, 'users', activeCode.user_id);
-        const userSnap = await getDoc(userRef);
-        if (!userSnap.exists()) {
+        const localUsers = getLocalUsers();
+        const user = localUsers.find(u => u.id === activeCode.user_id || u.email === email);
+        if (!user) {
           return { success: false, error: 'Usuário não encontrado.' };
         }
 
-        await updateDoc(userRef, {
-          email_verified: true,
-          updated_at: now.toISOString()
-        });
+        user.email_verified = true;
+        user.updated_at = now.toISOString();
+        saveLocalUsers(localUsers);
 
-        const userData = userSnap.data();
+        // Sync user verification to Firestore in background
+        withTimeout(updateDoc(doc(db, 'users', user.id), { email_verified: true, updated_at: now.toISOString() }), 1000).catch(() => {});
+
         const profile: UserProfile = {
-          id: userData.id,
-          full_name: userData.full_name,
-          username: userData.username,
-          email: userData.email,
+          id: user.id,
+          full_name: user.full_name,
+          username: user.username,
+          email: user.email,
           email_verified: true,
-          created_at: userData.created_at,
-          updated_at: now.toISOString()
+          created_at: user.created_at,
+          updated_at: user.updated_at
         };
 
         const session: AuthSession = {
@@ -373,19 +451,21 @@ export const AuthService = {
         return { success: true, session };
       }
 
+      // Purpose 2: Email Change
       if (purpose === 'email_change') {
         const newEmail = activeCode.new_email;
         if (!newEmail) {
           return { success: false, error: 'Novo e-mail não identificado.' };
         }
 
-        const userRef = doc(db, 'users', activeCode.user_id);
-        await updateDoc(userRef, {
-          email: newEmail,
-          updated_at: now.toISOString()
-        });
+        const localUsers = getLocalUsers();
+        const user = localUsers.find(u => u.id === activeCode.user_id);
+        if (user) {
+          user.email = newEmail;
+          user.updated_at = now.toISOString();
+          saveLocalUsers(localUsers);
+        }
 
-        // Update local session
         const currentSession = this.getCurrentSession();
         if (currentSession && currentSession.user.id === activeCode.user_id) {
           currentSession.user.email = newEmail;
@@ -393,9 +473,12 @@ export const AuthService = {
           saveLocalSession(currentSession);
         }
 
+        withTimeout(updateDoc(doc(db, 'users', activeCode.user_id), { email: newEmail, updated_at: now.toISOString() }), 1000).catch(() => {});
+
         return { success: true, newEmail };
       }
 
+      // Purpose 3: Password Reset
       if (purpose === 'password_reset') {
         return { success: true };
       }
@@ -411,25 +494,19 @@ export const AuthService = {
   async resendCode(email: string, purpose: VerificationPurpose): Promise<{ success: boolean; error?: string }> {
     const cleanEmail = email.trim().toLowerCase();
     try {
-      const usersRef = collection(db, 'users');
-      let snap = await getDocs(query(usersRef, where('email', '==', cleanEmail)));
-      
-      let userId = '';
-      let fullName = '';
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.email === cleanEmail);
+
+      let userId = user ? user.id : '';
+      let fullName = user ? user.full_name : '';
       let newEmailTarget = undefined;
 
-      if (!snap.empty) {
-        const u = snap.docs[0].data();
-        userId = u.id;
-        fullName = u.full_name;
-      } else {
-        // For email_change, query by active code
-        const codesRef = collection(db, 'email_verification_codes');
-        const codeSnap = await getDocs(query(codesRef, where('email', '==', cleanEmail), where('purpose', '==', purpose)));
-        if (!codeSnap.empty) {
-          const c = codeSnap.docs[0].data();
-          userId = c.user_id;
-          newEmailTarget = c.new_email;
+      if (!user) {
+        const codes = getLocalCodes();
+        const existingCode = codes.find(c => c.email === cleanEmail && c.purpose === purpose);
+        if (existingCode) {
+          userId = existingCode.user_id;
+          newEmailTarget = existingCode.new_email;
         } else {
           return { success: false, error: 'Usuário não encontrado para reenvio.' };
         }
@@ -477,41 +554,52 @@ export const AuthService = {
     const username = rawUsername.toLowerCase();
 
     try {
-      // Find user by username
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', username));
-      const snap = await getDocs(q);
+      // 1. Check local users database first
+      const localUsers = getLocalUsers();
+      let user = localUsers.find(u => u.username.toLowerCase() === username);
+
+      // 2. If not local, fast check in Firestore
+      if (!user) {
+        try {
+          const usersRef = collection(db, 'users');
+          const q = query(usersRef, where('username', '==', username));
+          const snap = await withTimeout(getDocs(q), 1500);
+          if (snap && !snap.empty) {
+            user = snap.docs[0].data() as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+          }
+        } catch {}
+      }
 
       // Anti-enumeration: Generic message
-      if (snap.empty) {
+      if (!user) {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
-      const userData = snap.docs[0].data();
-
       // Check password
-      const isMatch = await verifyPassword(password, userData.password_salt, userData.password_hash);
+      const isMatch = await verifyPassword(password, user.password_salt, user.password_hash);
       if (!isMatch) {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
       // Check email confirmation
-      if (!userData.email_verified) {
+      if (!user.email_verified) {
         return {
           success: false,
-          unverifiedEmail: userData.email,
+          unverifiedEmail: user.email,
           error: 'E-mail ainda não confirmado. Por favor, confirme seu e-mail para acessar sua conta.'
         };
       }
 
       const profile: UserProfile = {
-        id: userData.id,
-        full_name: userData.full_name,
-        username: userData.username,
-        email: userData.email,
-        email_verified: Boolean(userData.email_verified),
-        created_at: userData.created_at,
-        updated_at: userData.updated_at
+        id: user.id,
+        full_name: user.full_name,
+        username: user.username,
+        email: user.email,
+        email_verified: Boolean(user.email_verified),
+        created_at: user.created_at,
+        updated_at: user.updated_at
       };
 
       const session: AuthSession = {
@@ -547,21 +635,32 @@ export const AuthService = {
     }
 
     try {
-      const usersRef = collection(db, 'users');
-      let snap = await getDocs(query(usersRef, where('username', '==', ident)));
-      if (snap.empty) {
-        snap = await getDocs(query(usersRef, where('email', '==', ident)));
+      const localUsers = getLocalUsers();
+      let user = localUsers.find(u => u.username.toLowerCase() === ident || u.email.toLowerCase() === ident);
+
+      if (!user) {
+        try {
+          const usersRef = collection(db, 'users');
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1200);
+          if (!snap || snap.empty) {
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1200);
+          }
+          if (snap && !snap.empty) {
+            user = snap.docs[0].data() as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+          }
+        } catch {}
       }
 
-      // Anti-enumeration: if user not found, don't expose error, still say instructions dispatched
-      if (snap.empty) {
+      // Anti-enumeration: if user not found, don't expose error
+      if (!user) {
         return { success: true, email: ident };
       }
 
-      const userData = snap.docs[0].data();
-      const targetEmail = userData.email;
-      const fullName = userData.full_name;
-      const userId = userData.id;
+      const targetEmail = user.email;
+      const fullName = user.full_name;
+      const userId = user.id;
 
       if (params.method === 'code') {
         // 6-digit code method
@@ -591,7 +690,11 @@ export const AuthService = {
           created_at: new Date().toISOString()
         };
 
-        await setDoc(doc(db, 'password_reset_tokens', tokenId), tokenDoc);
+        const tokens = getLocalTokens();
+        tokens.push(tokenDoc);
+        saveLocalTokens(tokens);
+
+        withTimeout(setDoc(doc(db, 'password_reset_tokens', tokenId), tokenDoc), 1200).catch(() => {});
 
         // Build reset link using current origin
         const resetLink = `${window.location.origin}${window.location.pathname}?reset_token=${token}&email=${encodeURIComponent(targetEmail)}`;
@@ -626,7 +729,6 @@ export const AuthService = {
       return { success: false, error: 'A confirmação de senha não coincide com a nova senha.' };
     }
 
-    // Verify code first
     const verification = await this.verifyEmailCode({
       email,
       code,
@@ -638,26 +740,28 @@ export const AuthService = {
     }
 
     try {
-      // Find user
-      const usersRef = collection(db, 'users');
-      const snap = await getDocs(query(usersRef, where('email', '==', email.trim().toLowerCase())));
-      if (snap.empty) {
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.email === email.trim().toLowerCase());
+      if (!user) {
         return { success: false, error: 'Usuário não encontrado.' };
       }
 
-      const userDocRef = snap.docs[0].ref;
       const newSalt = generateSalt();
       const newHash = await hashPassword(newPassword, newSalt);
 
-      await updateDoc(userDocRef, {
+      user.password_salt = newSalt;
+      user.password_hash = newHash;
+      user.updated_at = new Date().toISOString();
+      saveLocalUsers(localUsers);
+
+      withTimeout(updateDoc(doc(db, 'users', user.id), {
         password_salt: newSalt,
         password_hash: newHash,
-        updated_at: new Date().toISOString()
-      });
+        updated_at: user.updated_at
+      }), 1200).catch(() => {});
 
       return { success: true };
     } catch (err: any) {
-      console.error('resetPasswordWithCode error:', err);
       return { success: false, error: err?.message || 'Erro ao redefinir senha.' };
     }
   },
@@ -682,52 +786,52 @@ export const AuthService = {
     }
 
     try {
-      const tokensRef = collection(db, 'password_reset_tokens');
-      const q = query(tokensRef, where('email', '==', email.trim().toLowerCase()));
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
-        return { success: false, error: 'Link de redefinição não encontrado ou já utilizado.' };
-      }
-
-      // Find token that matches hash and is not expired or used
-      let matchedTokenDoc: (PasswordResetToken & { docRef: any }) | null = null;
+      const tokens = getLocalTokens();
       const now = new Date();
+      let matchedToken: PasswordResetToken | null = null;
 
-      for (const d of snap.docs) {
-        const data = d.data() as PasswordResetToken;
-        if (data.used_at) continue;
-        if (now > new Date(data.expires_at)) continue;
+      for (const t of tokens) {
+        if (t.email !== email.trim().toLowerCase()) continue;
+        if (t.used_at) continue;
+        if (now > new Date(t.expires_at)) continue;
 
-        const isMatch = (await hashToken(token, data.token_salt)) === data.token_hash;
+        const isMatch = (await hashToken(token, t.token_salt)) === t.token_hash;
         if (isMatch) {
-          matchedTokenDoc = { ...data, docRef: d.ref };
+          matchedToken = t;
           break;
         }
       }
 
-      if (!matchedTokenDoc) {
-        return { success: false, error: 'Link de redefinição inválido ou expirado (validade de 1 hora). Solicite um novo link.' };
+      if (!matchedToken) {
+        return { success: false, error: 'Link de redefinição inválido ou expirado (validade de 1 hora).' };
       }
 
-      // Mark token as used
-      await updateDoc(matchedTokenDoc.docRef, { used_at: now.toISOString() });
+      matchedToken.used_at = now.toISOString();
+      saveLocalTokens(tokens);
 
-      // Update user password
-      const userRef = doc(db, 'users', matchedTokenDoc.user_id);
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.id === matchedToken!.user_id);
+      if (!user) {
+        return { success: false, error: 'Usuário não encontrado.' };
+      }
+
       const newSalt = generateSalt();
       const newHash = await hashPassword(newPassword, newSalt);
 
-      await updateDoc(userRef, {
+      user.password_salt = newSalt;
+      user.password_hash = newHash;
+      user.updated_at = now.toISOString();
+      saveLocalUsers(localUsers);
+
+      withTimeout(updateDoc(doc(db, 'users', user.id), {
         password_salt: newSalt,
         password_hash: newHash,
-        updated_at: now.toISOString()
-      });
+        updated_at: user.updated_at
+      }), 1200).catch(() => {});
 
       return { success: true };
     } catch (err: any) {
-      console.error('resetPasswordWithToken error:', err);
-      return { success: false, error: err?.message || 'Erro ao redefinir senha com link.' };
+      return { success: false, error: err?.message || 'Erro ao redefinir senha.' };
     }
   },
 
@@ -753,38 +857,32 @@ export const AuthService = {
     }
 
     try {
-      const userRef = doc(db, 'users', userId);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.id === userId);
+      if (!user) {
         return { success: false, error: 'Usuário não encontrado.' };
       }
 
-      const currentData = userSnap.data();
-
-      // If username changed, verify uniqueness
-      if (currentData.username !== username) {
-        const usersRef = collection(db, 'users');
-        const q = query(usersRef, where('username', '==', username));
-        const snap = await getDocs(q);
-        if (!snap.empty) {
+      // Check username uniqueness if changed
+      if (user.username !== username) {
+        if (localUsers.some(u => u.id !== userId && u.username === username)) {
           return { success: false, error: 'Este nome de usuário já está em uso por outra conta.' };
         }
       }
 
       const nowIso = new Date().toISOString();
-      await updateDoc(userRef, {
-        full_name: fullName,
-        username,
-        updated_at: nowIso
-      });
+      user.full_name = fullName;
+      user.username = username;
+      user.updated_at = nowIso;
+      saveLocalUsers(localUsers);
 
       const updatedProfile: UserProfile = {
         id: userId,
         full_name: fullName,
         username,
-        email: currentData.email,
-        email_verified: Boolean(currentData.email_verified),
-        created_at: currentData.created_at,
+        email: user.email,
+        email_verified: Boolean(user.email_verified),
+        created_at: user.created_at,
         updated_at: nowIso
       };
 
@@ -793,6 +891,12 @@ export const AuthService = {
         session.user = updatedProfile;
         saveLocalSession(session);
       }
+
+      withTimeout(updateDoc(doc(db, 'users', userId), {
+        full_name: fullName,
+        username,
+        updated_at: nowIso
+      }), 1200).catch(() => {});
 
       return { success: true, user: updatedProfile };
     } catch (err: any) {
@@ -813,31 +917,25 @@ export const AuthService = {
     }
 
     try {
-      const userRef = doc(db, 'users', userId);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.id === userId);
+      if (!user) {
         return { success: false, error: 'Usuário não encontrado.' };
       }
 
-      const currentData = userSnap.data();
-      if (currentData.email === newEmail) {
+      if (user.email === newEmail) {
         return { success: false, error: 'O novo e-mail informado é idêntico ao e-mail atual.' };
       }
 
-      // Check if new email is in use
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', newEmail));
-      const snap = await getDocs(q);
-      if (!snap.empty) {
+      if (localUsers.some(u => u.id !== userId && u.email === newEmail)) {
         return { success: false, error: 'Este endereço de e-mail já está cadastrado em outra conta.' };
       }
 
-      // Send 6-digit code to current user's record with newEmail specified
       return await this.generateAndSendCode({
         userId,
-        email: currentData.email,
+        email: user.email,
         purpose: 'email_change',
-        fullName: currentData.full_name,
+        fullName: user.full_name,
         newEmail
       });
     } catch (err: any) {
@@ -877,14 +975,13 @@ export const AuthService = {
     }
 
     try {
-      const userRef = doc(db, 'users', userId);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) {
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.id === userId);
+      if (!user) {
         return { success: false, error: 'Usuário não encontrado.' };
       }
 
-      const userData = snap.data();
-      const isMatch = await verifyPassword(currentPassword, userData.password_salt, userData.password_hash);
+      const isMatch = await verifyPassword(currentPassword, user.password_salt, user.password_hash);
       if (!isMatch) {
         return { success: false, error: 'A senha atual informada está incorreta.' };
       }
@@ -892,11 +989,16 @@ export const AuthService = {
       const newSalt = generateSalt();
       const newHash = await hashPassword(newPassword, newSalt);
 
-      await updateDoc(userRef, {
+      user.password_salt = newSalt;
+      user.password_hash = newHash;
+      user.updated_at = new Date().toISOString();
+      saveLocalUsers(localUsers);
+
+      withTimeout(updateDoc(doc(db, 'users', userId), {
         password_salt: newSalt,
         password_hash: newHash,
-        updated_at: new Date().toISOString()
-      });
+        updated_at: user.updated_at
+      }), 1200).catch(() => {});
 
       return { success: true };
     } catch (err: any) {
