@@ -95,7 +95,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   const getPublicUrl = () => {
     const cleanSlug = slugify(slug) || 'slug';
-    return `${window.location.origin}/n/${cleanSlug}`;
+    const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+    const origin = window.location.origin;
+    const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+    return `${origin}${cleanBase}/n/${cleanSlug}`;
   };
 
   const handleCopyLink = async () => {
@@ -243,7 +246,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-brand-500/50">
               <span className="text-xs text-gray-400 select-none pr-1">
-                {window.location.host}/n/
+                {window.location.host}{((import.meta as any).env?.BASE_URL || '/').replace(/\/+$/, '')}/n/
               </span>
               <input
                 type="text"
@@ -341,7 +344,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 {copied ? 'Copiado!' : 'Copiar'}
               </button>
               <a
-                href={`/n/${slugify(slug)}`}
+                href={getPublicUrl()}
                 target="_blank"
                 rel="noreferrer"
                 className="p-2 border border-gray-200 dark:border-[#232838] bg-white dark:bg-[#11131a] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-600 dark:text-gray-300 rounded-lg transition-colors"

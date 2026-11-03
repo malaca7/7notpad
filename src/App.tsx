@@ -29,35 +29,27 @@ export function MainLayout() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Simple routing for /n/:slug or #/n/:slug
-  const [publicSlug, setPublicSlug] = useState<string | null>(() => {
+  // Routing helper for /n/:slug or /7notpad/n/:slug or #/n/:slug
+  const getSlugFromLocation = () => {
     const path = window.location.pathname;
     const hash = window.location.hash;
     
-    // Check path: /n/minha-nota
-    if (path.startsWith('/n/')) {
-      const slug = path.replace('/n/', '').trim();
-      return slug || null;
+    if (path.includes('/n/')) {
+      const parts = path.split('/n/');
+      return parts[1]?.replace(/\/+$/, '').trim() || null;
     }
-    // Check hash fallback: #/n/minha-nota
-    if (hash.startsWith('#/n/')) {
-      const slug = hash.replace('#/n/', '').trim();
-      return slug || null;
+    if (hash.includes('#/n/')) {
+      const parts = hash.split('#/n/');
+      return parts[1]?.replace(/\/+$/, '').trim() || null;
     }
     return null;
-  });
+  };
+
+  const [publicSlug, setPublicSlug] = useState<string | null>(getSlugFromLocation);
 
   useEffect(() => {
     const handleLocationChange = () => {
-      const path = window.location.pathname;
-      const hash = window.location.hash;
-      if (path.startsWith('/n/')) {
-        setPublicSlug(path.replace('/n/', '').trim());
-      } else if (hash.startsWith('#/n/')) {
-        setPublicSlug(hash.replace('#/n/', '').trim());
-      } else {
-        setPublicSlug(null);
-      }
+      setPublicSlug(getSlugFromLocation());
     };
 
     window.addEventListener('popstate', handleLocationChange);
@@ -69,7 +61,8 @@ export function MainLayout() {
   }, []);
 
   const handleGoHome = () => {
-    window.history.pushState({}, '', '/');
+    const basePath = (import.meta as any).env?.BASE_URL || '/';
+    window.history.pushState({}, '', basePath);
     setPublicSlug(null);
   };
 
