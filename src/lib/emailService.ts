@@ -31,20 +31,20 @@ export function notifyDispatchedEmail(email: DispatchedEmail & { deliveredExtern
   });
 }
 
-function saveLocalDispatchedEmail(email: DispatchedEmail) {
+function saveLocalDispatchedEmail(email: DispatchedEmail & { deliveredExternally?: boolean; externalError?: string }) {
   try {
     const raw = localStorage.getItem(DISPATCHED_EMAILS_KEY);
-    const list: DispatchedEmail[] = raw ? JSON.parse(raw) : [];
+    const list: (DispatchedEmail & { deliveredExternally?: boolean; externalError?: string })[] = raw ? JSON.parse(raw) : [];
     const updated = [email, ...list.filter(e => e.id !== email.id)].slice(0, 15);
     localStorage.setItem(DISPATCHED_EMAILS_KEY, JSON.stringify(updated));
   } catch {}
 }
 
-export function getLastDispatchedEmail(targetEmail?: string): DispatchedEmail | null {
+export function getLastDispatchedEmail(targetEmail?: string): (DispatchedEmail & { deliveredExternally?: boolean; externalError?: string }) | null {
   try {
     const raw = localStorage.getItem(DISPATCHED_EMAILS_KEY);
     if (!raw) return null;
-    const list: DispatchedEmail[] = JSON.parse(raw);
+    const list: (DispatchedEmail & { deliveredExternally?: boolean; externalError?: string })[] = JSON.parse(raw);
     if (targetEmail) {
       const match = list.find(e => e.to.toLowerCase() === targetEmail.toLowerCase().trim());
       return match || null;
@@ -229,37 +229,57 @@ export const EmailService = {
       try {
         const url = config.webhookUrl.trim();
         const isGoogleScript = url.includes('script.google.com');
+        const payloadObj = {
+          to: to.trim(),
+          subject,
+          code,
+          resetLink,
+          fullName,
+          html,
+          text: plainText
+        };
+        const payloadStr = JSON.stringify(payloadObj);
 
         if (isGoogleScript) {
-          // Google Apps Script redirect works cleanly without preflight CORS blockers
-          await fetch(url, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              to: to.trim(),
-              subject,
-              code,
-              resetLink,
-              fullName,
-              html,
-              text: plainText
-            })
-          });
-          return { success: true };
+          try {
+            // Try standard CORS request with text/plain (supported natively by Google Apps Script when 'Who has access' = 'Anyone')
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: payloadStr,
+              redirect: 'follow'
+            });
+
+            if (res.ok) {
+              const data = await res.json().catch(() => ({ success: true }));
+              if (data && data.success === false) {
+                return {
+                  success: false,
+                  error: `Erro no script do Google: ${data.error || 'Autorize o MailApp clicando em Executar no Google Apps Script.'}`
+                };
+              }
+              return { success: true };
+            } else {
+              return {
+                success: false,
+                error: `Google Apps Script retornou status ${res.status} (Acesso restrito). Mude "Quem pode acessar" para "Qualquer pessoa" e crie uma "Nova versão".`
+              };
+            }
+          } catch {
+            // Also try GET query fallback with no-cors in case doGet is active
+            const getUrl = `${url}?to=${encodeURIComponent(to.trim())}&subject=${encodeURIComponent(subject)}&code=${encodeURIComponent(code || '')}`;
+            fetch(getUrl, { method: 'GET', mode: 'no-cors' }).catch(() => {});
+
+            return {
+              success: false,
+              error: 'O Google Apps Script bloqueou o envio externo (Erro 401: Permissão "Somente eu" ou falta de autorização). No Google Apps Script: 1) Salve o código e clique em "▷ Executar" para autorizar o Gmail; 2) Em Implantar > Gerenciar implantações > Editar (lápis), selecione Versão: "Nova versão" e Quem pode acessar: "Qualquer pessoa".'
+            };
+          }
         } else {
           const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              to: to.trim(),
-              subject,
-              code,
-              resetLink,
-              fullName,
-              html,
-              text: plainText
-            })
+            body: payloadStr
           });
 
           if (res.ok) {

@@ -19,7 +19,7 @@ import {
 import { Modal } from '../common/Modal';
 import { CodeInput } from './CodeInput';
 import { AuthService, isValidEmail, isValidUsername } from '../../lib/authService';
-import { getLastDispatchedEmail, getEmailConfig } from '../../lib/emailService';
+import { getLastDispatchedEmail } from '../../lib/emailService';
 
 export type AuthModalView = 
   | 'login' 
@@ -60,7 +60,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [recoveryMethod, setRecoveryMethod] = useState<'code' | 'link'>('code');
 
-  const emailConfig = getEmailConfig();
   const lastDispatched = getLastDispatchedEmail(email) || getLastDispatchedEmail();
   const availableCode = lastDispatched?.code;
 
@@ -218,7 +217,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setView('confirm-email');
         setSecondsRemaining(600); // 10 minutes
         setResendCooldown(30);
-        setSuccessMsg('Cadastro realizado! Enviamos o código de 6 dígitos para seu e-mail.');
+        const dispatched = getLastDispatchedEmail(email);
+        if (dispatched?.deliveredExternally) {
+          setSuccessMsg('Cadastro realizado! Enviamos o código de 6 dígitos para sua caixa de entrada.');
+        } else {
+          setSuccessMsg('Cadastro realizado! Utilize o código de 6 dígitos gerado abaixo para confirmar sua conta.');
+        }
       }
     } finally {
       setLoading(false);
@@ -752,10 +756,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </div>
               <p className="text-slate-300 leading-relaxed text-[11px]">
-                {emailConfig.provider !== 'simulated' ? (
+                {lastDispatched?.deliveredExternally ? (
                   <>
-                    Enviamos o código para <strong>{email}</strong> via {emailConfig.provider.toUpperCase()}. Se não encontrar na Caixa de Entrada em instantes, confira a pasta de <strong>Spam / Lixo Eletrônico</strong>.
+                    Enviamos o código para <strong>{email}</strong> com sucesso! Se não encontrar na Caixa de Entrada em instantes, confira a pasta de <strong>Spam / Lixo Eletrônico</strong>.
                   </>
+                ) : lastDispatched?.externalError ? (
+                  <span className="text-amber-300">
+                    ⚠️ {lastDispatched.externalError}
+                  </span>
                 ) : (
                   <>
                     Como o site está em hospedagem estática no GitHub Pages, para que os e-mails cheguem no seu Gmail você pode conectar o <strong>Google Apps Script</strong> (100% grátis) ou <strong>Brevo</strong> nas Configurações.

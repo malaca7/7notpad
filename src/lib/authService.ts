@@ -211,14 +211,21 @@ export const AuthService = {
     }
 
     try {
-      // 1. Check uniqueness in local storage first
-      const localUsers = getLocalUsers();
-      if (localUsers.some(u => u.username.toLowerCase() === username)) {
+      // 1. Check uniqueness in local storage first (allow overwriting unverified attempts so user can re-send code)
+      let localUsers = getLocalUsers();
+      const verifiedByUsername = localUsers.find(u => u.username.toLowerCase() === username && u.email_verified);
+      if (verifiedByUsername) {
         return { success: false, error: 'Este nome de usuário já está em uso. Escolha outro.' };
       }
-      if (localUsers.some(u => u.email.toLowerCase() === email)) {
+      const verifiedByEmail = localUsers.find(u => u.email.toLowerCase() === email && u.email_verified);
+      if (verifiedByEmail) {
         return { success: false, error: 'Este e-mail já está cadastrado. Faça login ou recupere sua senha.' };
       }
+
+      // Remove any previous unverified attempt with the same username or email
+      localUsers = localUsers.filter(
+        u => u.email_verified || (u.username.toLowerCase() !== username && u.email.toLowerCase() !== email)
+      );
 
       // 2. Fast check in Firestore with timeout (if online and configured)
       try {

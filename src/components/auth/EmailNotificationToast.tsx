@@ -71,6 +71,11 @@ export const EmailNotificationToast: React.FC = () => {
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                 <span>Enviado via servidor de e-mail. Verifique sua Caixa de Entrada/Spam.</span>
               </div>
+            ) : email.externalError ? (
+              <div className="mb-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] leading-relaxed flex items-start gap-1.5">
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
+                <span>{email.externalError}</span>
+              </div>
             ) : null}
 
             {email.code && (

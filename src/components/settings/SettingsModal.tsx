@@ -66,7 +66,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [emailConfig, setEmailConfig] = useState<EmailProviderConfig>(() => getEmailConfig());
   const [testEmailAddress, setTestEmailAddress] = useState(user?.email || 'malaca7x@gmail.com');
   const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
-  const [showAppsScriptGuide, setShowAppsScriptGuide] = useState(false);
+  const [showAppsScriptGuide, setShowAppsScriptGuide] = useState(true);
 
   // Profile Edit states
   const [fullNameInput, setFullNameInput] = useState('');
@@ -328,23 +328,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const appsScriptCode = `function doPost(e) {
+  const appsScriptCode = `// 1. Clique em "Executar" (▷) com esta função selecionada para autorizar o Gmail:
+function autorizarETestarEmail() {
+  var email = Session.getActiveUser().getEmail() || "malacarogeriojr@gmail.com";
+  MailApp.sendEmail({
+    to: email,
+    subject: "7NotPad — Permissao do Gmail Autorizada!",
+    body: "Seu Google Apps Script do 7NotPad esta autorizado e pronto para enviar codigos de 6 digitos."
+  });
+}
+
+function doGet(e) {
+  return processarEnvio(e);
+}
+
+function doPost(e) {
+  return processarEnvio(e);
+}
+
+function processarEnvio(e) {
   try {
-    var data = JSON.parse(e.postData.contents);
+    var data = {};
+    if (e && e.postData && e.postData.contents) {
+      data = JSON.parse(e.postData.contents);
+    } else if (e && e.parameter) {
+      data = e.parameter;
+    }
+
     var to = data.to;
-    var subject = data.subject || "7NotPad — Notificação";
-    var body = data.text || "Seu código do 7NotPad";
+    if (!to) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ success: false, error: "Destinatario (to) ausente" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var subject = data.subject || "7NotPad — Codigo de Confirmacao";
+    var body = data.text || (data.code ? "Seu codigo de verificacao de 6 digitos do 7NotPad e: " + data.code : "Notificacao 7NotPad");
     var htmlBody = data.html || "";
 
-    MailApp.sendEmail({
-      to: to,
-      subject: subject,
-      body: body,
-      htmlBody: htmlBody
-    });
+    var options = { to: to, subject: subject, body: body };
+    if (htmlBody) options.htmlBody = htmlBody;
+
+    MailApp.sendEmail(options);
 
     return ContentService
-      .createTextOutput(JSON.stringify({ success: true, message: "E-mail enviado pelo Gmail!" }))
+      .createTextOutput(JSON.stringify({ success: true, message: "E-mail enviado pelo Gmail para " + to }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (error) {
     return ContentService
@@ -930,11 +958,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
 
                       <ol start={3} className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-300">
-                        <li>Clique em <strong>Implantar (Deploy)</strong> &rarr; <strong>Nova Implantação</strong>.</li>
-                        <li>Escolha o tipo: <strong>Aplicativo da Web</strong>.</li>
-                        <li>Em <em>Quem tem acesso</em>, selecione <strong>Qualquer pessoa (Anyone)</strong>.</li>
-                        <li>Clique em <strong>Implantar</strong>, autorize as permissões da sua conta e copie a <strong>URL do aplicativo da Web</strong> gerada.</li>
-                        <li>Cole a URL no campo acima e clique em <strong>Salvar Configuração</strong>!</li>
+                        <li>No topo do Apps Script, clique em <strong>▷ Executar</strong> (com <code>autorizarETestarEmail</code> selecionado) e aceite as permissões da sua conta Gmail (<em>Revisar permissões &rarr; Avançado &rarr; Acessar projeto</em>).</li>
+                        <li>Clique em <strong>Implantar</strong> &rarr; <strong>Gerenciar implantações</strong> &rarr; ícone de <strong>Lápis (Editar)</strong>.</li>
+                        <li>Em <em>Versão</em>, escolha <strong>Nova versão</strong> (muito importante!).</li>
+                        <li>Em <em>Quem pode acessar</em>, selecione <strong>Qualquer pessoa (Anyone)</strong> e clique em <strong>Implantar</strong>.</li>
                       </ol>
                     </div>
                   )}
