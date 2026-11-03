@@ -6,7 +6,7 @@ import { getOrCreateOwnerToken } from '../../lib/crypto';
 import { exportNotesToJson, importNotesFromJson } from '../../lib/exportImport';
 import { StorageService } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
-import { EmailService, getEmailConfig, saveEmailConfig } from '../../lib/emailService';
+import { EmailService, getEmailConfig, saveEmailConfig, DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID, DEFAULT_APPS_SCRIPT_URL } from '../../lib/emailService';
 import type { EmailProviderConfig } from '../../types/auth';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../common/Toast';
@@ -854,9 +854,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <form onSubmit={handleSaveEmailConfig} className="p-4 rounded-2xl bg-white dark:bg-[#0f1118] border border-gray-200 dark:border-[#232838] space-y-4">
               {emailConfig.provider === 'webhook' && (
                 <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-1 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Google Apps Script Configurado e Ativo
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setEmailConfig({ provider: 'webhook', webhookUrl: DEFAULT_APPS_SCRIPT_URL })}
+                        className="text-[10px] text-emerald-400 hover:underline font-medium"
+                      >
+                        Restaurar URL Padrão
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono break-all">
+                      ID da Implantação: {DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID}
+                    </div>
+                  </div>
+
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                      URL do Webhook do Google Apps Script
+                      URL do App da Web (Google Apps Script)
                     </label>
                     <button
                       type="button"
@@ -864,13 +883,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       className="text-[11px] text-brand-400 hover:underline flex items-center gap-1 font-medium"
                     >
                       <HelpCircle className="w-3.5 h-3.5" />
-                      {showAppsScriptGuide ? 'Ocultar Tutorial' : 'Como criar em 1 minuto?'}
+                      {showAppsScriptGuide ? 'Ocultar Tutorial' : 'Ver Código / Tutorial'}
                     </button>
                   </div>
 
                   <input
                     type="url"
-                    value={emailConfig.webhookUrl || ''}
+                    value={emailConfig.webhookUrl || DEFAULT_APPS_SCRIPT_URL}
                     onChange={e => setEmailConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
                     placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
                     className="w-full px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"

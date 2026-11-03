@@ -5,6 +5,9 @@ import type { DispatchedEmail, VerificationPurpose, EmailProviderConfig } from '
 const EMAIL_CONFIG_KEY = '7notpad_email_config';
 const DISPATCHED_EMAILS_KEY = '7notpad_dispatched_emails';
 
+export const DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID = 'AKfycbzCrjbVNUCEqVSC2JmV_HF_jV0KE1eGmvx4RV6f9A3-6Yr6MBPH5R8hdtg9MOlmbHx7Xw';
+export const DEFAULT_APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzCrjbVNUCEqVSC2JmV_HF_jV0KE1eGmvx4RV6f9A3-6Yr6MBPH5R8hdtg9MOlmbHx7Xw/exec';
+
 type EmailListener = (email: DispatchedEmail & { deliveredExternally?: boolean; externalError?: string }) => void;
 const emailListeners = new Set<EmailListener>();
 
@@ -55,10 +58,21 @@ export function getLastDispatchedEmail(targetEmail?: string): DispatchedEmail | 
 export function getEmailConfig(): EmailProviderConfig {
   try {
     const raw = localStorage.getItem(EMAIL_CONFIG_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed: EmailProviderConfig = JSON.parse(raw);
+      if (!parsed.webhookUrl) {
+        parsed.webhookUrl = DEFAULT_APPS_SCRIPT_URL;
+      }
+      // Automatically activate the configured Google Apps Script if previously in default simulated mode
+      if (parsed.provider === 'simulated' && parsed.webhookUrl === DEFAULT_APPS_SCRIPT_URL) {
+        parsed.provider = 'webhook';
+      }
+      return parsed;
+    }
   } catch {}
   return {
-    provider: 'simulated'
+    provider: 'webhook',
+    webhookUrl: DEFAULT_APPS_SCRIPT_URL
   };
 }
 
