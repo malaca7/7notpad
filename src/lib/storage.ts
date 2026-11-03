@@ -2,6 +2,7 @@ import type { Note, NoteShare } from '../types/note';
 import { getOrCreateOwnerToken } from './crypto';
 import { FirebaseService } from './firebase';
 import { parsePortablePayload, decryptContent, type PortableNoteData } from './portableShare';
+import { AuthService } from './authService';
 
 const LOCAL_STORAGE_NOTES_KEY = '7notpad_notes';
 const LOCAL_STORAGE_SHARES_KEY = '7notpad_shares';
@@ -84,9 +85,10 @@ let activePortableData: (PortableNoteData & { slug: string }) | null = null;
  * Storage Service: combines Local-First with Firebase Firestore
  */
 export const StorageService = {
-  // Fetch all notes for current owner
-  async fetchNotes(): Promise<Note[]> {
+  // Fetch all notes for current owner or user
+  async fetchNotes(userId?: string): Promise<Note[]> {
     const ownerToken = getOrCreateOwnerToken();
+    const currentUserId = userId || AuthService.getCurrentUser()?.id;
     const localNotes = getLocalNotes();
 
     try {
@@ -99,7 +101,7 @@ export const StorageService = {
       }
 
       // 2. Fetch fresh notes from Firebase
-      const remoteNotes = await FirebaseService.fetchNotes(ownerToken);
+      const remoteNotes = await FirebaseService.fetchNotes(ownerToken, currentUserId);
 
       if (remoteNotes && remoteNotes.length > 0) {
         // Merge remote notes with local notes (prefer newest updated_at)
@@ -123,6 +125,9 @@ export const StorageService = {
       } else if (localNotes.length > 0) {
         // If Firebase is empty, sync local notes to Firebase
         for (const localNote of localNotes) {
+          if (currentUserId && !localNote.user_id) {
+            localNote.user_id = currentUserId;
+          }
           await FirebaseService.saveNote(localNote);
         }
       }
@@ -134,8 +139,28 @@ export const StorageService = {
     }
   },
 
+  // Migrate local anonymous notes to user account
+  async migrateLocalNotesToUser(userId: string): Promise<number> {
+    const localNotes = getLocalNotes();
+    let count = 0;
+    for (const note of localNotes) {
+      if (!note.user_id || note.user_id !== userId) {
+        note.user_id = userId;
+        await FirebaseService.saveNote(note);
+        count++;
+      }
+    }
+    saveLocalNotes(localNotes);
+    return count;
+  },
+
   // Save or update note
   async saveNote(note: Note): Promise<{ success: boolean }> {
+    const currentUser = AuthService.getCurrentUser();
+    if (currentUser && !note.user_id) {
+      note.user_id = currentUser.id;
+    }
+
     // 1. Update local storage first (instant responsiveness)
     const localNotes = getLocalNotes();
     const existingIndex = localNotes.findIndex(n => n.id === note.id || n.local_id === note.local_id);

@@ -46,6 +46,7 @@ export const FirebaseService = {
         created_at: note.created_at,
         updated_at: note.updated_at,
         owner_token: note.owner_token,
+        user_id: note.user_id || null,
         is_pinned: Boolean(note.is_pinned),
         color: note.color || null,
         share: note.share || null,
@@ -64,11 +65,13 @@ export const FirebaseService = {
     }
   },
 
-  // Fetch all notes for a specific owner_token
-  async fetchNotes(ownerToken: string): Promise<Note[]> {
+  // Fetch all notes for a specific owner_token or user_id
+  async fetchNotes(ownerToken: string, userId?: string): Promise<Note[]> {
     try {
       const notesRef = collection(db, 'notes');
-      const q = query(notesRef, where('owner_token', '==', ownerToken));
+      const q = userId
+        ? query(notesRef, where('user_id', '==', userId))
+        : query(notesRef, where('owner_token', '==', ownerToken));
       const snapshot = await getDocs(q);
 
       const notes: Note[] = [];
@@ -82,6 +85,7 @@ export const FirebaseService = {
           created_at: data.created_at || new Date().toISOString(),
           updated_at: data.updated_at || new Date().toISOString(),
           owner_token: data.owner_token || ownerToken,
+          user_id: data.user_id || undefined,
           is_pinned: Boolean(data.is_pinned),
           color: data.color || undefined,
           share: data.share || null,

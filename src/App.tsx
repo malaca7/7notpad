@@ -8,6 +8,8 @@ import { ShareModal } from './components/share/ShareModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { PublicNoteView } from './components/share/PublicNoteView';
 import { BrowserWarningBanner } from './components/settings/BrowserWarningBanner';
+import { AuthModal, type AuthModalView } from './components/auth/AuthModal';
+import { EmailNotificationToast } from './components/auth/EmailNotificationToast';
 import { useNotes } from './hooks/useNotes';
 
 export function MainLayout() {
@@ -28,6 +30,13 @@ export function MainLayout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
+
+  // Auth Modal states
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalView, setAuthModalView] = useState<AuthModalView>('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [resetTokenParam, setResetTokenParam] = useState('');
 
   // Routing helper for /notpad/:slug, /7notpad/notpad/:slug, /n/:slug or #/notpad/:slug
   const getSlugFromLocation = () => {
@@ -62,6 +71,22 @@ export function MainLayout() {
 
   const [publicSlug, setPublicSlug] = useState<string | null>(getSlugFromLocation);
 
+  // Check URL parameters for reset_token or password-reset hash
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('reset_token');
+      const email = params.get('email') || '';
+
+      if (token) {
+        setResetTokenParam(token);
+        setAuthEmail(email);
+        setAuthModalView('reset-link');
+        setIsAuthModalOpen(true);
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     const handleLocationChange = () => {
       setPublicSlug(getSlugFromLocation());
@@ -94,7 +119,14 @@ export function MainLayout() {
       {/* Top Navbar */}
       <Navbar
         onToggleMobileSidebar={() => setIsMobileSidebarOpen(prev => !prev)}
-        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onOpenSettings={(tab) => {
+          if (tab) setSettingsInitialTab(tab);
+          setIsSettingsModalOpen(true);
+        }}
+        onOpenAuthModal={() => {
+          setAuthModalView('login');
+          setIsAuthModalOpen(true);
+        }}
         totalNotes={notes.length}
       />
 
@@ -157,7 +189,28 @@ export function MainLayout() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         onNotesImported={loadNotes}
+        initialTab={settingsInitialTab}
+        onOpenAuthModal={() => {
+          setIsSettingsModalOpen(false);
+          setAuthModalView('signup');
+          setIsAuthModalOpen(true);
+        }}
       />
+
+      {/* Auth Modal (Login, Cadastro, Verificação 6 dígitos, Recuperação de Senha) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        initialView={authModalView}
+        initialEmail={authEmail}
+        resetToken={resetTokenParam}
+        onSuccess={() => {
+          loadNotes();
+        }}
+      />
+
+      {/* In-app Transactional Email Toast Dispatcher */}
+      <EmailNotificationToast />
     </div>
   );
 }

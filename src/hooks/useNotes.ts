@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Note, SaveStatus, NoteShare } from '../types/note';
 import { StorageService } from '../lib/storage';
 import { getOrCreateOwnerToken } from '../lib/crypto';
+import { AuthService, subscribeToAuth } from '../lib/authService';
 import { useToast } from '../components/common/Toast';
 
 export function useNotes() {
@@ -38,6 +39,11 @@ export function useNotes() {
 
   useEffect(() => {
     loadNotes();
+
+    const unsub = subscribeToAuth(() => {
+      loadNotes();
+    });
+    return unsub;
   }, []);
 
   // Get active note object
@@ -46,6 +52,7 @@ export function useNotes() {
   // Create new note
   const createNote = useCallback((initialData?: { title?: string; content?: string }) => {
     const ownerToken = getOrCreateOwnerToken();
+    const currentUser = AuthService.getCurrentUser();
     const newNote: Note = {
       id: crypto.randomUUID(),
       local_id: crypto.randomUUID(),
@@ -54,6 +61,7 @@ export function useNotes() {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       owner_token: ownerToken,
+      user_id: currentUser?.id,
       is_pinned: false,
       attachments: [],
       share: null,

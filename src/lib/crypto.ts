@@ -2,7 +2,7 @@
  * Cryptography and security utilities for 7NotPad
  */
 
-// Generate random salt for passwords
+// Generate random salt for passwords and tokens
 export function generateSalt(length = 16): string {
   const array = new Uint8Array(length);
   window.crypto.getRandomValues(array);
@@ -27,6 +27,50 @@ export async function verifyPassword(password: string, salt: string, expectedHas
     console.error('Password verification failed:', err);
     return false;
   }
+}
+
+// Generate cryptographically secure 6-digit numeric verification code
+export function generateSixDigitCode(): string {
+  const array = new Uint32Array(1);
+  window.crypto.getRandomValues(array);
+  // Ensure exactly 6 digits between 100000 and 999999
+  const code = (100000 + (array[0] % 900000)).toString();
+  return code;
+}
+
+// Hash 6-digit verification code with salt
+export async function hashCode(code: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  const data = enc.encode(`${salt}:${code}:7notpad-code-salt`);
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Verify 6-digit code against stored hash
+export async function verifyCode(code: string, salt: string, expectedHash: string): Promise<boolean> {
+  try {
+    const computedHash = await hashCode(code.trim(), salt);
+    return computedHash === expectedHash;
+  } catch {
+    return false;
+  }
+}
+
+// Generate cryptographically secure random token (e.g. for reset link or auth session)
+export function generateSecureToken(byteLength = 32): string {
+  const array = new Uint8Array(byteLength);
+  window.crypto.getRandomValues(array);
+  return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Hash reset token
+export async function hashToken(token: string, salt: string): Promise<string> {
+  const enc = new TextEncoder();
+  const data = enc.encode(`${salt}:${token}:7notpad-token-salt`);
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 // Get or create anonymous owner token
@@ -71,4 +115,5 @@ export function slugify(text: string): string {
     .replace(/^-+/, '') // trim - from start of text
     .replace(/-+$/, ''); // trim - from end of text
 }
+
 

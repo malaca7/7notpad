@@ -30,6 +30,7 @@ export interface Note {
   created_at: string;
   updated_at: string;
   owner_token: string;
+  user_id?: string;
   is_pinned?: boolean;
   color?: string;
   attachments?: Attachment[];
