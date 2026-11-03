@@ -4,7 +4,6 @@ import type { Note, NoteShare } from '../../types/note';
 import { StorageService } from '../../lib/storage';
 import { generateSalt, hashPassword, generateRandomSlug, slugify } from '../../lib/crypto';
 import { generatePortablePayload } from '../../lib/portableShare';
-import { isSupabaseConfigured } from '../../lib/supabase';
 import { useToast } from '../common/Toast';
 import confetti from 'canvas-confetti';
 import { 
@@ -36,7 +35,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   onShareUpdated,
 }) => {
   const { success, error } = useToast();
-  const hasCloud = isSupabaseConfigured();
 
   const [isActive, setIsActive] = useState<boolean>(note.share?.is_active ?? false);
   const [slug, setSlug] = useState<string>(note.share?.custom_slug || '');
@@ -49,7 +47,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [isSlugConflict, setIsSlugConflict] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [portableHash, setPortableHash] = useState<string>('');
-  const [linkMode, setLinkMode] = useState<'portable' | 'short'>(hasCloud ? 'short' : 'portable');
+  const [linkMode, setLinkMode] = useState<'portable' | 'short'>('short');
 
   // Sync state when modal opens or note changes
   useEffect(() => {
@@ -68,9 +66,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       }
       setIsSlugConflict(false);
       setCopiedType(null);
-      setLinkMode(hasCloud ? 'short' : 'portable');
+      setLinkMode('short');
     }
-  }, [isOpen, note, hasCloud]);
+  }, [isOpen, note]);
 
   // Generate portable hash whenever note, share, or password changes
   useEffect(() => {
@@ -410,22 +408,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             {/* Description of current mode */}
             {linkMode === 'portable' ? (
               <p className="text-xs text-brand-400 dark:text-brand-300 leading-relaxed">
-                ✨ <strong>Link Universal Portátil:</strong> Funciona <strong>instantaneamente em qualquer navegador e celular</strong> sem depender de banco de dados ou login.
+                ✨ <strong>Link Universal:</strong> Funciona offline e com os dados da nota embutidos com segurança no link.
               </p>
             ) : (
-              <div className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-                {hasCloud ? (
-                  <span className="text-emerald-400 flex items-center gap-1">
-                    <Cloud className="w-3.5 h-3.5" />
-                    Sincronizado na Nuvem Supabase. Funciona em qualquer navegador.
-                  </span>
-                ) : (
-                  <span className="text-amber-400 flex items-start gap-1.5">
-                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>Nuvem Supabase não configurada. Para que o link curto funcione em outros navegadores, use o <strong>Link Universal</strong> ou conecte o Supabase nas configurações.</span>
-                  </span>
-                )}
-              </div>
+              <p className="text-xs text-emerald-500 dark:text-emerald-400 flex items-center gap-1.5 leading-relaxed">
+                <Cloud className="w-3.5 h-3.5 shrink-0" />
+                <span><strong>Link Curto (Nuvem Firebase):</strong> Sincronizado globalmente no Firebase. Abre em qualquer navegador ou celular.</span>
+              </p>
             )}
 
             {/* URL Box */}

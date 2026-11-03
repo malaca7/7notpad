@@ -45,7 +45,7 @@ Aplicação web moderna, rápida, minimalista e totalmente responsiva de bloco d
 - **Estilização:** Tailwind CSS + Radix/Lucide Icons
 - **Editor:** TipTap (`@tiptap/react`, `@tiptap/starter-kit`, extensões)
 - **Criptografia:** Web Crypto API (`window.crypto.subtle` com SHA-256)
-- **Nuvem & Banco:** Supabase (PostgreSQL, Row Level Security, RPC Security Definer)
+- **Nuvem & Banco:** Firebase Firestore (`malacagroup`) com sincronização global em tempo real
 - **Modo Local:** LocalStorage / IndexedDB com sincronização híbrida local-first
 
 ---

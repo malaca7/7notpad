@@ -1,14 +1,12 @@
 import React from 'react';
 import { useTheme } from '../../hooks/useTheme';
-import { isSupabaseConfigured } from '../../lib/supabase';
 import { 
   Menu, 
   Sun, 
   Moon, 
   Settings as SettingsIcon, 
   Cloud, 
-  Download,
-  Database
+  Download
 } from 'lucide-react';
 import { exportNotesToJson } from '../../lib/exportImport';
 
@@ -24,7 +22,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   totalNotes,
 }) => {
   const { theme, toggleTheme } = useTheme();
-  const isCloudActive = isSupabaseConfigured();
 
   return (
     <header className="h-14 border-b border-gray-200 dark:border-[#232838] bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md px-4 flex items-center justify-between shrink-0 z-20">
@@ -49,24 +46,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Sync Status Badge & Action Controls */}
       <div className="flex items-center gap-2.5">
-        {/* Sync Status */}
+        {/* Firebase Cloud Sync Status */}
         <button
           type="button"
           onClick={onOpenSettings}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#14161f] text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
-          title={`Status da Nuvem: ${isCloudActive ? 'Conectado' : 'Local'} (${totalNotes} notas)`}
+          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
+          title={`Firebase Conectado (${totalNotes} notas)`}
         >
-          {isCloudActive ? (
-            <>
-              <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Sincronização Ativa</span>
-            </>
-          ) : (
-            <>
-              <Database className="w-3.5 h-3.5 text-brand-400" />
-              <span>Modo Local</span>
-            </>
-          )}
+          <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Firebase Conectado</span>
         </button>
 
         {/* Quick Export Backup */}

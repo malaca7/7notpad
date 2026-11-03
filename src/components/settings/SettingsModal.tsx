@@ -1,9 +1,10 @@
 import React, { useState, useRef } from 'react';
 import { Modal } from '../common/Modal';
 import { useEditorSettings } from '../../hooks/useEditorSettings';
-import { getSupabaseCredentials, saveSupabaseCredentials, clearSupabaseCredentials, isSupabaseConfigured } from '../../lib/supabase';
+import { firebaseConfig } from '../../lib/firebase';
 import { getOrCreateOwnerToken } from '../../lib/crypto';
 import { exportNotesToJson, importNotesFromJson } from '../../lib/exportImport';
+import { StorageService } from '../../lib/storage';
 import { useToast } from '../common/Toast';
 import { 
   Settings, 
@@ -14,9 +15,10 @@ import {
   Upload, 
   Key, 
   Check, 
-  AlertTriangle,
   RotateCcw,
-  Sparkles
+  RefreshCw,
+  Database,
+  CheckCircle2
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -31,39 +33,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onNotesImported,
 }) => {
   const { settings, updateSettings, defaultSettings } = useEditorSettings();
-  const { success, error, info } = useToast();
+  const { success, error } = useToast();
 
   const [activeTab, setActiveTab] = useState<'editor' | 'cloud' | 'security' | 'backup'>('editor');
-  
-  // Supabase credentials state
-  const creds = getSupabaseCredentials();
-  const [supabaseUrl, setSupabaseUrl] = useState(creds.url);
-  const [supabaseKey, setSupabaseKey] = useState(creds.key);
-  const [isCloudConfigured, setIsCloudConfigured] = useState(isSupabaseConfigured());
   const [copiedToken, setCopiedToken] = useState(false);
+  const [isMigrating, setIsMigrating] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const ownerToken = getOrCreateOwnerToken();
-
-  const handleSaveSupabase = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!supabaseUrl.trim() || !supabaseKey.trim()) {
-      error('Preencha os campos', 'Informe a URL e a Anon Key do seu projeto Supabase.');
-      return;
-    }
-
-    saveSupabaseCredentials(supabaseUrl, supabaseKey);
-    setIsCloudConfigured(true);
-    success('Configuração Salva!', 'Credenciais do Supabase configuradas com sucesso.');
-  };
-
-  const handleDisconnectSupabase = () => {
-    clearSupabaseCredentials();
-    setSupabaseUrl('');
-    setSupabaseKey('');
-    setIsCloudConfigured(false);
-    info('Desconectado', 'Supabase desconectado. As notas permanecem salvas localmente.');
-  };
 
   const handleCopyOwnerToken = async () => {
     try {
@@ -76,6 +53,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleMigrateToFirebase = async () => {
+    setIsMigrating(true);
+    try {
+      const res = await StorageService.migrateAllToFirebase();
+      success(
+        'Migração Concluída!',
+        `${res.migratedNotes} notas e ${res.migratedShares} compartilhamentos sincronizados com o Firebase.`
+      );
+    } catch (err: any) {
+      error('Erro na migração', err?.message || 'Falha ao migrar para o Firebase.');
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -83,6 +75,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const result = await importNotesFromJson(file);
     if (result.success) {
       success('Backup restaurado!', `${result.count} nota(s) importada(s) com sucesso.`);
+      // Also migrate newly imported notes to Firebase
+      StorageService.migrateAllToFirebase().catch(() => {});
       if (onNotesImported) onNotesImported();
       onClose();
     } else {
@@ -106,7 +100,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Configurações</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-              Aparência do editor, nuvem Supabase e segurança anônima
+              Aparência do editor, nuvem Firebase e segurança anônima
             </p>
           </div>
         </div>
@@ -136,7 +130,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Cloud className="w-3.5 h-3.5" />
-            Nuvem Supabase
+            Nuvem Firebase
           </button>
           <button
             onClick={() => setActiveTab('security')}
@@ -262,67 +256,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         )}
 
-        {/* Tab 2: Supabase Cloud */}
+        {/* Tab 2: Firebase Cloud */}
         {activeTab === 'cloud' && (
           <div className="space-y-4">
-            <div className="p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-              <p className="font-semibold text-brand-400 mb-1 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4" />
-                Sincronização em Nuvem Supabase
+            <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-200 space-y-2">
+              <div className="flex items-center gap-2 font-bold text-emerald-400 text-sm">
+                <CheckCircle2 className="w-5 h-5" />
+                Nuvem Firebase Conectada com Sucesso
+              </div>
+              <p className="leading-relaxed opacity-95">
+                O 7NotPad está integrado ao projeto <strong>{firebaseConfig.projectId}</strong> no Firebase Firestore. Qualquer link compartilhado criado em seu navegador funcionará instantaneamente em qualquer outro computador, celular ou navegador!
               </p>
-              O 7NotPad funciona 100% offline e localmente por padrão. Se desejar sincronizar suas notas na nuvem e habilitar compartilhamento público global, insira as credenciais do seu projeto Supabase abaixo.
             </div>
 
-            <form onSubmit={handleSaveSupabase} className="space-y-3">
+            <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] space-y-2.5 text-xs text-gray-600 dark:text-gray-300">
+              <div className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-brand-400" />
+                Detalhes do Banco de Dados:
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                <div>Project ID: <span className="text-brand-400">{firebaseConfig.projectId}</span></div>
+                <div>Auth Domain: <span className="text-brand-400">{firebaseConfig.authDomain}</span></div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-brand-500/5 border border-brand-500/20 flex items-center justify-between">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Supabase Project URL
-                </label>
-                <input
-                  type="text"
-                  value={supabaseUrl}
-                  onChange={(e) => setSupabaseUrl(e.target.value)}
-                  placeholder="https://xyzproject.supabase.co"
-                  className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50"
-                />
+                <div className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                  Sincronizar Todas as Notas Locais Agora
+                </div>
+                <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Envia todas as notas salvas no seu navegador para o banco Firebase
+                </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Supabase Anon Key (Public)
-                </label>
-                <input
-                  type="password"
-                  value={supabaseKey}
-                  onChange={(e) => setSupabaseKey(e.target.value)}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                  className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50"
-                />
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                {isCloudConfigured ? (
-                  <button
-                    type="button"
-                    onClick={handleDisconnectSupabase}
-                    className="text-xs text-rose-500 hover:underline"
-                  >
-                    Desconectar Nuvem
-                  </button>
-                ) : (
-                  <div className="text-[11px] text-gray-400 italic">
-                    Schema SQL disponível no arquivo <code>supabase_schema.sql</code>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-medium shadow-md shadow-brand-600/20 transition-all"
-                >
-                  Salvar Credenciais
-                </button>
-              </div>
-            </form>
+              <button
+                type="button"
+                onClick={handleMigrateToFirebase}
+                disabled={isMigrating}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50 shrink-0"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isMigrating ? 'animate-spin' : ''}`} />
+                <span>{isMigrating ? 'Sincronizando...' : 'Sincronizar Tudo'}</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -353,16 +330,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {copiedToken ? 'Copiado!' : 'Copiar'}
                 </button>
               </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200 space-y-1.5">
-              <div className="flex items-center gap-1.5 font-bold text-amber-400">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                Aviso Importante sobre Dados Locais
-              </div>
-              <p className="leading-relaxed opacity-90">
-                Como o 7NotPad não exige login, suas notas são vinculadas exclusivamente ao armazenamento deste navegador. Se você limpar os dados do navegador (cookies e cache), o acesso às notas locais pode ser perdido. Recomendamos baixar um backup periódico na aba Backup!
-              </p>
             </div>
           </div>
         )}
@@ -433,4 +400,3 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     </Modal>
   );
 };
-

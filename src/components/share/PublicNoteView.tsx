@@ -195,7 +195,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
               Por que isso acontece?
             </div>
             <p className="leading-relaxed opacity-90">
-              Se esta nota foi criada em outro navegador ou celular, você deve utilizar o <strong>Link Universal</strong> (o link completo gerado pelo botão Compartilhar do 7NotPad) ou ativar a <strong>Nuvem Supabase</strong> nas configurações para links curtos.
+              Esta nota pode ter sido desativada pelo proprietário ou o link foi digitado incorretamente. Se a nota foi criada recentemente, verifique se o proprietário salvou o compartilhamento no 7NotPad.
             </p>
           </div>
 
