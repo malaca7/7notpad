@@ -277,6 +277,8 @@ export const StorageService = {
     isCloudConfigured?: boolean;
     isPortable?: boolean;
   }> {
+    let cloudError: string | undefined = undefined;
+
     // 1. Query Firebase Firestore first (live global cloud database!)
     try {
       const firebaseResult = await FirebaseService.fetchPublicNote(slug);
@@ -288,7 +290,18 @@ export const StorageService = {
           note: firebaseResult.note
         };
       }
-    } catch (err) {
+
+      if (firebaseResult.error) {
+        cloudError = firebaseResult.error;
+        if (firebaseResult.error.toLowerCase().includes('desativad')) {
+          return {
+            found: false,
+            error: 'O compartilhamento desta nota foi desativado pelo proprietário.'
+          };
+        }
+      }
+    } catch (err: any) {
+      cloudError = err?.message;
       console.warn('Firebase fetch public note error:', err);
     }
 
@@ -353,7 +366,7 @@ export const StorageService = {
 
     return { 
       found: false, 
-      error: 'Nota não encontrada.',
+      error: cloudError || 'Nota não encontrada.',
       isCloudConfigured: true
     };
   },

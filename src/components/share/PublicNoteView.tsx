@@ -32,6 +32,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
 
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [share, setShare] = useState<NoteShare | null>(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -53,12 +54,15 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
     let isMounted = true;
     const fetchNote = async () => {
       setIsLoading(true);
+      setNotFound(false);
+      setErrorMessage('');
       try {
         const result = await StorageService.fetchPublicNote(slug);
         if (!isMounted) return;
 
         if (!result.found || !result.share) {
           setNotFound(true);
+          setErrorMessage(result.error || '');
           setIsLoading(false);
           return;
         }
@@ -76,8 +80,11 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
           setIsLocked(false);
           setContent(result.note?.content || '');
         }
-      } catch (err) {
-        if (isMounted) setNotFound(true);
+      } catch (err: any) {
+        if (isMounted) {
+          setNotFound(true);
+          setErrorMessage(err?.message || '');
+        }
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -173,6 +180,9 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   }
 
   if (notFound) {
+    const isDeactivated = errorMessage.toLowerCase().includes('desativad');
+    const isFirebaseUnconfigured = errorMessage.toLowerCase().includes('firestore') || errorMessage.toLowerCase().includes('permission_denied') || errorMessage.toLowerCase().includes('api has not been used');
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 p-4">
         <div className="max-w-md w-full text-center space-y-5 p-8 rounded-3xl bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] shadow-2xl">
@@ -182,20 +192,24 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
           
           <div className="space-y-2">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              Nota Não Encontrada
+              {isDeactivated ? 'Compartilhamento Desativado' : 'Nota Não Encontrada'}
             </h1>
             <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-              O link <code className="text-brand-400 font-mono bg-brand-500/10 px-1.5 py-0.5 rounded">/n/{slug}</code> não foi localizado neste navegador.
+              O link <code className="text-brand-400 font-mono bg-brand-500/10 px-1.5 py-0.5 rounded">/notpad/{slug}</code> {isDeactivated ? 'foi desativado pelo proprietário.' : 'não foi localizado.'}
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20 text-left text-xs text-gray-600 dark:text-gray-300 space-y-2">
             <div className="font-semibold text-brand-400 flex items-center gap-1.5">
               <Info className="w-4 h-4 shrink-0" />
-              Por que isso acontece?
+              {isDeactivated ? 'Status do Compartilhamento' : 'Por que isso acontece?'}
             </div>
             <p className="leading-relaxed opacity-90">
-              Esta nota pode ter sido desativada pelo proprietário ou o link foi digitado incorretamente. Se a nota foi criada recentemente, verifique se o proprietário salvou o compartilhamento no 7NotPad.
+              {isDeactivated 
+                ? 'O proprietário da nota desativou o link público nas opções de compartilhamento.'
+                : isFirebaseUnconfigured
+                ? 'Para sincronizar links curtos /notpad/:slug entre navegadores diferentes, o Cloud Firestore precisa estar ativado no Firebase Console (Projeto malacagroup -> Firestore Database -> Criar banco de dados).'
+                : 'Esta nota pode ter sido criada sem ativar o compartilhamento, ou o link foi digitado incorretamente. Se você é o proprietário, abra a nota no seu navegador original, clique em Compartilhar e copie o link novamente.'}
             </p>
           </div>
 
