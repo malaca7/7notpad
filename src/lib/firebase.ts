@@ -29,6 +29,16 @@ export const firebaseConfig = {
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db: Firestore = getFirestore(app);
 
+// Helper to prevent Firestore calls from hanging indefinitely when offline or unconfigured
+function withTimeout<T>(promise: Promise<T>, ms = 1500): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('Firestore timeout')), ms)
+    )
+  ]);
+}
+
 // Firestore Collections:
 // 1. 'notes': doc id is note.id
 // 2. 'note_shares': doc id is custom_slug
@@ -38,7 +48,7 @@ export const FirebaseService = {
   async saveNote(note: Note): Promise<boolean> {
     try {
       const noteRef = doc(db, 'notes', note.id);
-      await setDoc(noteRef, {
+      await withTimeout(setDoc(noteRef, {
         id: note.id,
         local_id: note.local_id || note.id,
         title: note.title,
@@ -51,7 +61,7 @@ export const FirebaseService = {
         color: note.color || null,
         share: note.share || null,
         attachments: note.attachments || []
-      }, { merge: true });
+      }, { merge: true }));
 
       // If note has an active share, also update the note_shares collection!
       if (note.share && note.share.custom_slug) {
@@ -72,7 +82,7 @@ export const FirebaseService = {
       const q = userId
         ? query(notesRef, where('user_id', '==', userId))
         : query(notesRef, where('owner_token', '==', ownerToken));
-      const snapshot = await getDocs(q);
+      const snapshot = await withTimeout(getDocs(q));
 
       const notes: Note[] = [];
       snapshot.forEach(docSnap => {
@@ -105,13 +115,13 @@ export const FirebaseService = {
   async deleteNote(noteId: string): Promise<boolean> {
     try {
       // 1. Delete note document
-      await deleteDoc(doc(db, 'notes', noteId));
+      await withTimeout(deleteDoc(doc(db, 'notes', noteId)));
 
       // 2. Also query and delete any corresponding shares
       const sharesRef = collection(db, 'note_shares');
       const q = query(sharesRef, where('note_id', '==', noteId));
-      const snapshot = await getDocs(q);
-      const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
+      const snapshot = await withTimeout(getDocs(q));
+      const deletePromises = snapshot.docs.map(d => withTimeout(deleteDoc(d.ref)));
       await Promise.all(deletePromises);
 
       return true;
@@ -126,7 +136,7 @@ export const FirebaseService = {
     try {
       // Check if custom_slug is already taken by another note
       const shareDocRef = doc(db, 'note_shares', share.custom_slug);
-      const existing = await getDoc(shareDocRef);
+      const existing = await withTimeout(getDoc(shareDocRef));
 
       if (existing.exists()) {
         const existingData = existing.data();
@@ -136,7 +146,7 @@ export const FirebaseService = {
       }
 
       // Save share doc (accessible by any visitor)
-      await setDoc(shareDocRef, {
+      await withTimeout(setDoc(shareDocRef, {
         id: share.id,
         note_id: note.id,
         custom_slug: share.custom_slug,
@@ -153,7 +163,7 @@ export const FirebaseService = {
         note_created_at: note.created_at,
         note_updated_at: note.updated_at,
         note_attachments: note.attachments || []
-      }, { merge: true });
+      }, { merge: true }));
 
       return { success: true };
     } catch (err: any) {
@@ -166,7 +176,7 @@ export const FirebaseService = {
   async revokeShare(slug: string): Promise<boolean> {
     try {
       const shareDocRef = doc(db, 'note_shares', slug);
-      await deleteDoc(shareDocRef);
+      await withTimeout(deleteDoc(shareDocRef));
       return true;
     } catch (err) {
       console.warn('Firebase revokeShare error:', err);
@@ -178,7 +188,7 @@ export const FirebaseService = {
   async isSlugTaken(slug: string, currentNoteId: string): Promise<boolean> {
     try {
       const shareDocRef = doc(db, 'note_shares', slug);
-      const snap = await getDoc(shareDocRef);
+      const snap = await withTimeout(getDoc(shareDocRef), 1000);
       if (snap.exists()) {
         const data = snap.data();
         return data.note_id !== currentNoteId;
@@ -198,7 +208,7 @@ export const FirebaseService = {
   }> {
     try {
       const shareDocRef = doc(db, 'note_shares', slug);
-      const snap = await getDoc(shareDocRef);
+      const snap = await withTimeout(getDoc(shareDocRef));
 
       if (!snap.exists()) {
         return { found: false, error: 'Nota não encontrada.' };
@@ -248,7 +258,7 @@ export const FirebaseService = {
   async unlockProtectedNoteContent(slug: string): Promise<string | null> {
     try {
       const shareDocRef = doc(db, 'note_shares', slug);
-      const snap = await getDoc(shareDocRef);
+      const snap = await withTimeout(getDoc(shareDocRef));
       if (snap.exists()) {
         const data = snap.data();
         return data.note_content || null;

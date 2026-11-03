@@ -89,29 +89,32 @@ export const StorageService = {
   async fetchNotes(userId?: string): Promise<Note[]> {
     const ownerToken = getOrCreateOwnerToken();
     const currentUserId = userId || AuthService.getCurrentUser()?.id;
-    const localNotes = getLocalNotes();
+    const initialLocalNotes = getLocalNotes();
 
     try {
-      // 1. Trigger migration if not done yet
+      // 1. Trigger migration in background if not done yet (never block UI load!)
       const isMigrated = localStorage.getItem(MIGRATED_FLAG_KEY);
-      if (!isMigrated && localNotes.length > 0) {
-        const localShares = getLocalShares();
-        await FirebaseService.migrateLocalData(localNotes, localShares);
+      if (!isMigrated && initialLocalNotes.length > 0) {
         localStorage.setItem(MIGRATED_FLAG_KEY, 'true');
+        const localShares = getLocalShares();
+        FirebaseService.migrateLocalData(initialLocalNotes, localShares).catch(() => {});
       }
 
-      // 2. Fetch fresh notes from Firebase
+      // 2. Fetch fresh notes from Firebase (protected by timeout in FirebaseService)
       const remoteNotes = await FirebaseService.fetchNotes(ownerToken, currentUserId);
 
+      // Always read the latest local notes AFTER the async call so we never overwrite notes created/edited while loading!
+      const freshLocalNotes = getLocalNotes();
+
       if (remoteNotes && remoteNotes.length > 0) {
-        // Merge remote notes with local notes (prefer newest updated_at)
+        // Merge remote notes with fresh local notes (prefer newest updated_at)
         const mergedMap = new Map<string, Note>();
-        for (const n of localNotes) {
+        for (const n of freshLocalNotes) {
           mergedMap.set(n.id, n);
         }
         for (const n of remoteNotes) {
           const local = mergedMap.get(n.id);
-          if (!local || new Date(n.updated_at) >= new Date(local.updated_at)) {
+          if (!local || new Date(n.updated_at).getTime() > new Date(local.updated_at).getTime()) {
             mergedMap.set(n.id, n);
           }
         }
@@ -122,20 +125,25 @@ export const StorageService = {
 
         saveLocalNotes(mergedNotes);
         return mergedNotes;
-      } else if (localNotes.length > 0) {
-        // If Firebase is empty, sync local notes to Firebase
-        for (const localNote of localNotes) {
+      } else if (freshLocalNotes.length > 0) {
+        // Sync local notes to Firebase in background (non-blocking)
+        let updatedLocally = false;
+        for (const localNote of freshLocalNotes) {
           if (currentUserId && !localNote.user_id) {
             localNote.user_id = currentUserId;
+            updatedLocally = true;
           }
-          await FirebaseService.saveNote(localNote);
+          FirebaseService.saveNote(localNote).catch(() => {});
+        }
+        if (updatedLocally) {
+          saveLocalNotes(freshLocalNotes);
         }
       }
 
-      return localNotes;
+      return freshLocalNotes;
     } catch (err) {
       console.warn('Network or Firebase failure, using local notes:', err);
-      return localNotes;
+      return getLocalNotes();
     }
   },
 
@@ -146,7 +154,7 @@ export const StorageService = {
     for (const note of localNotes) {
       if (!note.user_id || note.user_id !== userId) {
         note.user_id = userId;
-        await FirebaseService.saveNote(note);
+        FirebaseService.saveNote(note).catch(() => {});
         count++;
       }
     }
@@ -154,37 +162,40 @@ export const StorageService = {
     return count;
   },
 
-  // Save or update note
+  // Save or update note (100% Local-First + Background Cloud Sync)
   async saveNote(note: Note): Promise<{ success: boolean }> {
     const currentUser = AuthService.getCurrentUser();
     if (currentUser && !note.user_id) {
       note.user_id = currentUser.id;
     }
 
-    // 1. Update local storage first (instant responsiveness)
+    const updatedNote: Note = {
+      ...note,
+      updated_at: note.updated_at || new Date().toISOString(),
+    };
+
+    // 1. Update local storage synchronously first (instant persistence)
     const localNotes = getLocalNotes();
-    const existingIndex = localNotes.findIndex(n => n.id === note.id || n.local_id === note.local_id);
+    const existingIndex = localNotes.findIndex(n => n.id === updatedNote.id || (updatedNote.local_id && n.local_id === updatedNote.local_id));
     
     if (existingIndex >= 0) {
-      localNotes[existingIndex] = { ...note, updated_at: new Date().toISOString() };
+      localNotes[existingIndex] = updatedNote;
     } else {
-      localNotes.unshift(note);
+      localNotes.unshift(updatedNote);
     }
     saveLocalNotes(localNotes);
 
-    // 2. Push to Firebase Firestore
-    try {
-      await FirebaseService.saveNote(note);
-      return { success: true };
-    } catch (err) {
-      console.warn('Firebase save note warning:', err);
-      return { success: true }; // still saved locally
-    }
+    // 2. Push to Firebase Firestore in background (non-blocking so UI never hangs on "Salvando...")
+    FirebaseService.saveNote(updatedNote).catch((err) => {
+      console.warn('Firebase background saveNote warning:', err);
+    });
+
+    return { success: true };
   },
 
   // Delete note
   async deleteNote(noteId: string): Promise<boolean> {
-    // 1. Remove from local storage
+    // 1. Remove from local storage immediately
     const localNotes = getLocalNotes().filter(n => n.id !== noteId && n.local_id !== noteId);
     saveLocalNotes(localNotes);
 
@@ -201,19 +212,17 @@ export const StorageService = {
       saveLocalShares(updatedShares);
     }
 
-    // 2. Delete from Firebase
-    try {
-      await FirebaseService.deleteNote(noteId);
-    } catch (err) {
+    // 2. Delete from Firebase in background
+    FirebaseService.deleteNote(noteId).catch((err) => {
       console.warn('Firebase delete note error:', err);
-    }
+    });
 
     return true;
   },
 
   // Save / Update Share
   async saveShare(share: NoteShare): Promise<{ success: boolean; error?: string }> {
-    // 1. Local storage persistence
+    // 1. Local storage persistence immediately
     const localShares = getLocalShares();
     localShares[share.custom_slug] = share;
     saveLocalShares(localShares);
@@ -224,8 +233,11 @@ export const StorageService = {
       note.share = share;
       saveLocalNotes(localNotes);
 
-      // 2. Save directly to Firebase Firestore
-      return await FirebaseService.saveShare(share, note);
+      // 2. Try saving to Firebase Firestore (with timeout), fallback to local success if offline
+      const res = await FirebaseService.saveShare(share, note);
+      if (!res.success && res.error?.includes('já está em uso')) {
+        return res;
+      }
     }
 
     return { success: true };
@@ -247,8 +259,8 @@ export const StorageService = {
       saveLocalNotes(localNotes);
     }
 
-    // Revoke from Firebase
-    await FirebaseService.revokeShare(slug);
+    // Revoke from Firebase in background
+    FirebaseService.revokeShare(slug).catch(() => {});
 
     return true;
   },
@@ -342,12 +354,12 @@ export const StorageService = {
       };
     }
 
-    // 3. Local shares fallback (same browser)
+    // 3. Local shares & local notes fallback (same browser)
     const localShares = getLocalShares();
-    const share = localShares[slug];
+    const localNotes = getLocalNotes();
+    const share = localShares[slug] || localNotes.find(n => n.share?.custom_slug === slug)?.share;
     if (share && share.is_active) {
-      const localNotes = getLocalNotes();
-      const note = localNotes.find(n => n.id === share.note_id);
+      const note = localNotes.find(n => n.id === share.note_id || n.share?.custom_slug === slug);
       if (note) {
         return {
           found: true,

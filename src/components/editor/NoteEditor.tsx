@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
@@ -39,6 +39,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const { settings } = useEditorSettings();
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [title, setTitle] = useState(note.title);
+  const onUpdateNoteRef = useRef(onUpdateNote);
+  onUpdateNoteRef.current = onUpdateNote;
 
   // Sync internal title when note.id or note.title changes
   useEffect(() => {
@@ -73,7 +75,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
-      onUpdateNote({ content: html });
+      onUpdateNoteRef.current({ content: html });
     },
   }, [note.id]);
 
