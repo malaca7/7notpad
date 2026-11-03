@@ -29,18 +29,33 @@ export function MainLayout() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Routing helper for /n/:slug or /7notpad/n/:slug or #/n/:slug
+  // Routing helper for /notpad/:slug, /7notpad/notpad/:slug, /n/:slug or #/notpad/:slug
   const getSlugFromLocation = () => {
     const path = window.location.pathname;
     const hash = window.location.hash;
     
+    // Check /notpad/ first
+    if (path.includes('/notpad/')) {
+      const parts = path.split('/notpad/');
+      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      if (slug) return slug;
+    }
+    // Check /n/
     if (path.includes('/n/')) {
       const parts = path.split('/n/');
-      return parts[1]?.replace(/\/+$/, '').trim() || null;
+      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      if (slug) return slug;
+    }
+    // Check hash fallback: #/notpad/ or #/n/
+    if (hash.includes('#/notpad/')) {
+      const parts = hash.split('#/notpad/');
+      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      if (slug) return slug;
     }
     if (hash.includes('#/n/')) {
       const parts = hash.split('#/n/');
-      return parts[1]?.replace(/\/+$/, '').trim() || null;
+      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      if (slug) return slug;
     }
     return null;
   };

@@ -339,7 +339,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
                   </div>
                 )}
                 <div className="ml-auto text-xs text-brand-400 font-mono">
-                  7notpad.com/n/{slug}
+                  7notpad.com/notpad/{slug}
                 </div>
               </div>
             </div>
