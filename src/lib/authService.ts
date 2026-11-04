@@ -37,12 +37,42 @@ export interface StoredUser {
   id: string;
   full_name: string;
   username: string; // unique lowercase
-  email: string; // unique lowercase
+  email: string;
+  birth_date?: string; // YYYY-MM-DD
+  security_question?: string;
+  security_answer?: string; // normalized
   password_salt: string;
   password_hash: string;
-  email_verified: boolean;
+  email_verified?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// Normalize date format to YYYY-MM-DD
+export function normalizeDate(dateStr?: string): string {
+  if (!dateStr) return '';
+  const clean = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+  const parts = clean.split(/[-/.]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return `${parts[0].padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+    } else {
+      return `${parts[2].padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+    }
+  }
+  return clean;
+}
+
+// Normalize security answers (lowercase, trim, strip accents and extra spaces)
+export function normalizeSecurityAnswer(str?: string): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
 }
 
 // Local Database Helpers (Local-First resilient storage)
@@ -223,24 +253,44 @@ export const AuthService = {
   },
 
   // ----------------------------------------------------
-  // ETAPA 1 — Cadastro de Usuários (Zero-Hang / Instantâneo)
+  // ETAPA 1 — Cadastro de Usuários (Sem Confirmação de E-mail / Direto)
   // ----------------------------------------------------
   async register(params: {
     fullName: string;
     username: string;
-    email: string;
     password: string;
     confirmPassword: string;
-  }): Promise<{ success: boolean; userId?: string; email?: string; error?: string }> {
+    birthDate: string; // YYYY-MM-DD
+    securityQuestion: string;
+    securityAnswer: string;
+    email?: string;
+  }): Promise<{ 
+    success: boolean; 
+    userId?: string; 
+    session?: AuthSession; 
+    user?: UserProfile; 
+    error?: string; 
+  }> {
     const fullName = params.fullName.trim();
-    const username = params.username.trim().toLowerCase();
-    const email = params.email.trim().toLowerCase();
+    const username = params.username.replace(/^@/, '').trim().toLowerCase();
+    const email = (params.email || '').trim().toLowerCase();
     const password = params.password;
     const confirmPassword = params.confirmPassword;
+    const birthDate = normalizeDate(params.birthDate);
+    const securityQuestion = params.securityQuestion.trim();
+    const securityAnswer = normalizeSecurityAnswer(params.securityAnswer);
 
     // Validate inputs
-    if (!fullName || !username || !email || !password || !confirmPassword) {
-      return { success: false, error: 'Todos os campos são obrigatórios.' };
+    if (!fullName || !username || !password || !confirmPassword) {
+      return { success: false, error: 'Por favor, preencha todos os campos obrigatórios.' };
+    }
+
+    if (!birthDate) {
+      return { success: false, error: 'Por favor, informe sua Data de Nascimento.' };
+    }
+
+    if (!securityQuestion || !securityAnswer) {
+      return { success: false, error: 'Selecione uma Pergunta de Segurança e preencha a Resposta Secreta.' };
     }
 
     const usernameCheck = isValidUsername(username);
@@ -248,8 +298,8 @@ export const AuthService = {
       return { success: false, error: usernameCheck.error };
     }
 
-    if (!isValidEmail(email)) {
-      return { success: false, error: 'Por favor, insira um endereço de e-mail válido.' };
+    if (email && !isValidEmail(email)) {
+      return { success: false, error: 'Por favor, insira um endereço de e-mail válido (ou deixe em branco).' };
     }
 
     if (password.length < 6) {
@@ -261,21 +311,12 @@ export const AuthService = {
     }
 
     try {
-      // 1. Check uniqueness in local storage first (allow overwriting unverified attempts so user can re-send code)
+      // 1. Check uniqueness in local storage first
       let localUsers = getLocalUsers();
-      const verifiedByUsername = localUsers.find(u => u.username.toLowerCase() === username && u.email_verified);
-      if (verifiedByUsername) {
-        return { success: false, error: 'Este nome de usuário já está em uso. Escolha outro.' };
+      const existingUser = localUsers.find(u => u.username.toLowerCase() === username);
+      if (existingUser) {
+        return { success: false, error: 'Este nome de usuário (@' + username + ') já está em uso. Escolha outro.' };
       }
-      const verifiedByEmail = localUsers.find(u => u.email.toLowerCase() === email && u.email_verified);
-      if (verifiedByEmail) {
-        return { success: false, error: 'Este e-mail já está cadastrado. Faça login ou recupere sua senha.' };
-      }
-
-      // Remove any previous unverified attempt with the same username or email
-      localUsers = localUsers.filter(
-        u => u.email_verified || (u.username.toLowerCase() !== username && u.email.toLowerCase() !== email)
-      );
 
       // 2. Fast check in Firestore with timeout (if online and configured)
       try {
@@ -283,13 +324,7 @@ export const AuthService = {
         const usernameQuery = query(usersRef, where('username', '==', username));
         const usernameSnap = await withTimeout(getDocs(usernameQuery), 1200);
         if (usernameSnap && !usernameSnap.empty) {
-          return { success: false, error: 'Este nome de usuário já está em uso. Escolha outro.' };
-        }
-
-        const emailQuery = query(usersRef, where('email', '==', email));
-        const emailSnap = await withTimeout(getDocs(emailQuery), 1200);
-        if (emailSnap && !emailSnap.empty) {
-          return { success: false, error: 'Este e-mail já está cadastrado. Faça login ou recupere sua senha.' };
+          return { success: false, error: 'Este nome de usuário (@' + username + ') já está em uso. Escolha outro.' };
         }
       } catch (err) {
         // Safe to continue with local validation
@@ -305,10 +340,13 @@ export const AuthService = {
         id: userId,
         full_name: fullName,
         username,
-        email,
+        email: email || `${username}@7notpad.local`,
+        birth_date: birthDate,
+        security_question: securityQuestion,
+        security_answer: securityAnswer,
         password_salt: salt,
         password_hash: passwordHash,
-        email_verified: false,
+        email_verified: true, // No email verification required!
         created_at: now,
         updated_at: now
       };
@@ -325,15 +363,28 @@ export const AuthService = {
       }).catch(() => {});
       withTimeout(setDoc(doc(db, 'users', userId), newUser), 1500).catch(() => {});
 
-      // 4. Generate and send 6-digit confirmation code immediately!
-      await this.generateAndSendCode({
-        userId,
-        email,
-        purpose: 'signup_verification',
-        fullName
-      });
+      // 4. Create and start authenticated session immediately!
+      const profile: UserProfile = {
+        id: userId,
+        full_name: fullName,
+        username,
+        email: newUser.email,
+        birth_date: birthDate,
+        security_question: securityQuestion,
+        email_verified: true,
+        created_at: now,
+        updated_at: now
+      };
 
-      return { success: true, userId, email };
+      const session: AuthSession = {
+        user: profile,
+        token: generateSecureToken(24),
+        login_at: now
+      };
+
+      saveLocalSession(session);
+
+      return { success: true, userId, session, user: profile };
     } catch (err: any) {
       console.error('Register error:', err);
       return { success: false, error: err?.message || 'Erro ao realizar cadastro.' };
@@ -587,7 +638,7 @@ export const AuthService = {
   },
 
   // ----------------------------------------------------
-  // ETAPA 3 — Login e Recuperação de Senha
+  // ETAPA 3 — Login e Recuperação de Senha por Perguntas de Segurança
   // ----------------------------------------------------
   async login(params: {
     username: string;
@@ -596,18 +647,9 @@ export const AuthService = {
     success: boolean; 
     session?: AuthSession; 
     error?: string; 
-    unverifiedEmail?: string; 
   }> {
     const rawUsername = params.username.trim();
     const password = params.password;
-
-    // Strict rule: reject email format!
-    if (rawUsername.includes('@')) {
-      return { 
-        success: false, 
-        error: 'O login deve ser realizado com o seu Nome de Usuário, e não com e-mail.' 
-      };
-    }
 
     if (!rawUsername || !password) {
       return { success: false, error: 'Por favor, preencha o nome de usuário e a senha.' };
@@ -617,19 +659,24 @@ export const AuthService = {
       return { success: false, error: 'A senha deve conter no mínimo 6 dígitos.' };
     }
 
-    const username = rawUsername.toLowerCase();
+    // Clean username (allow with or without @ prefix, e.g. @malaca or malaca)
+    const username = rawUsername.replace(/^@/, '').toLowerCase();
 
     try {
-      // 1. Check local users database first
+      // 1. Check local users database first (by username or email)
       const localUsers = getLocalUsers();
-      let user = localUsers.find(u => u.username.toLowerCase() === username);
+      let user = localUsers.find(
+        u => u.username.toLowerCase() === username || (u.email && u.email.toLowerCase() === username)
+      );
 
       // 2. If not local, fast check in Firestore
       if (!user) {
         try {
           const usersRef = collection(db, 'users');
-          const q = query(usersRef, where('username', '==', username));
-          const snap = await withTimeout(getDocs(q), 1500);
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', username))), 1500);
+          if (!snap || snap.empty) {
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', username))), 1500);
+          }
           if (snap && !snap.empty) {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
@@ -638,7 +685,6 @@ export const AuthService = {
         } catch {}
       }
 
-      // Anti-enumeration: Generic message
       if (!user) {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
@@ -649,21 +695,15 @@ export const AuthService = {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
-      // Check email confirmation
-      if (!user.email_verified) {
-        return {
-          success: false,
-          unverifiedEmail: user.email,
-          error: 'E-mail ainda não confirmado. Por favor, confirme seu e-mail para acessar sua conta.'
-        };
-      }
-
+      // No email confirmation blocker! Login immediately
       const profile: UserProfile = {
         id: user.id,
         full_name: user.full_name,
         username: user.username,
         email: user.email,
-        email_verified: Boolean(user.email_verified),
+        birth_date: user.birth_date,
+        security_question: user.security_question,
+        email_verified: true,
         created_at: user.created_at,
         updated_at: user.updated_at
       };
@@ -679,6 +719,233 @@ export const AuthService = {
     } catch (err: any) {
       console.error('Login error:', err);
       return { success: false, error: err?.message || 'Erro ao realizar login.' };
+    }
+  },
+
+  // Retrieve user security question for password reset
+  async getSecurityQuestion(identifier: string): Promise<{
+    success: boolean;
+    username?: string;
+    fullName?: string;
+    question?: string;
+    hasSecurityData?: boolean;
+    error?: string;
+  }> {
+    const ident = identifier.replace(/^@/, '').trim().toLowerCase();
+    if (!ident) {
+      return { success: false, error: 'Informe seu nome de usuário (@usuario).' };
+    }
+
+    try {
+      const localUsers = getLocalUsers();
+      let user = localUsers.find(
+        u => u.username.toLowerCase() === ident || (u.email && u.email.toLowerCase() === ident)
+      );
+
+      if (!user) {
+        try {
+          const usersRef = collection(db, 'users');
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1500);
+          if (!snap || snap.empty) {
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1500);
+          }
+          if (snap && !snap.empty) {
+            user = snap.docs[0].data() as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+          }
+        } catch {}
+      }
+
+      if (!user) {
+        return { success: false, error: 'Usuário não encontrado. Verifique o @usuario digitado.' };
+      }
+
+      return {
+        success: true,
+        username: user.username,
+        fullName: user.full_name,
+        question: user.security_question || 'Qual o nome do seu primeiro animal de estimação?',
+        hasSecurityData: Boolean(user.security_question && user.birth_date),
+      };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erro ao buscar dados do usuário.' };
+    }
+  },
+
+  // Reset password verifying birth date and security question answer
+  async resetPasswordWithSecurityAnswers(params: {
+    identifier: string;
+    birthDate: string;
+    securityAnswer: string;
+    newPassword: string;
+    confirmPassword: string;
+  }): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
+    const ident = params.identifier.replace(/^@/, '').trim().toLowerCase();
+    const birthDateInput = normalizeDate(params.birthDate);
+    const answerInput = normalizeSecurityAnswer(params.securityAnswer);
+    const newPassword = params.newPassword;
+    const confirmPassword = params.confirmPassword;
+
+    if (!ident) {
+      return { success: false, error: 'Identificador do usuário não informado.' };
+    }
+    if (!birthDateInput) {
+      return { success: false, error: 'Informe a sua data de nascimento.' };
+    }
+    if (!answerInput) {
+      return { success: false, error: 'Informe a resposta da pergunta de segurança.' };
+    }
+    if (newPassword.length < 6) {
+      return { success: false, error: 'A nova senha deve ter no mínimo 6 dígitos.' };
+    }
+    if (newPassword !== confirmPassword) {
+      return { success: false, error: 'A confirmação de senha não coincide com a nova senha digitada.' };
+    }
+
+    try {
+      const localUsers = getLocalUsers();
+      let user = localUsers.find(
+        u => u.username.toLowerCase() === ident || (u.email && u.email.toLowerCase() === ident)
+      );
+
+      if (!user) {
+        try {
+          const usersRef = collection(db, 'users');
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1500);
+          if (!snap || snap.empty) {
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1500);
+          }
+          if (snap && !snap.empty) {
+            user = snap.docs[0].data() as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+          }
+        } catch {}
+      }
+
+      if (!user) {
+        return { success: false, error: 'Usuário não encontrado.' };
+      }
+
+      // Check birth date
+      if (user.birth_date) {
+        const storedDate = normalizeDate(user.birth_date);
+        if (storedDate !== birthDateInput) {
+          return { success: false, error: 'Data de nascimento incorreta para este usuário.' };
+        }
+      }
+
+      // Check security answer
+      if (user.security_answer) {
+        const storedAnswer = normalizeSecurityAnswer(user.security_answer);
+        if (storedAnswer !== answerInput) {
+          return { success: false, error: 'Resposta da pergunta de segurança incorreta.' };
+        }
+      }
+
+      // If user is a legacy account without security info, record the verified info now
+      if (!user.birth_date) user.birth_date = birthDateInput;
+      if (!user.security_answer) user.security_answer = answerInput;
+
+      // Update password
+      const newSalt = generateSalt();
+      const newHash = await hashPassword(newPassword, newSalt);
+      user.password_salt = newSalt;
+      user.password_hash = newHash;
+      user.updated_at = new Date().toISOString();
+      saveLocalUsers(localUsers);
+
+      // Replicate to Firestore
+      withTimeout(
+        updateDoc(doc(db, 'users', user.id), {
+          password_salt: newSalt,
+          password_hash: newHash,
+          birth_date: user.birth_date,
+          security_answer: user.security_answer,
+          updated_at: user.updated_at,
+        }),
+        1500
+      ).catch(() => {});
+
+      // Automatically login the user with the new password
+      const profile: UserProfile = {
+        id: user.id,
+        full_name: user.full_name,
+        username: user.username,
+        email: user.email,
+        birth_date: user.birth_date,
+        security_question: user.security_question,
+        email_verified: true,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      };
+
+      const session: AuthSession = {
+        user: profile,
+        token: generateSecureToken(24),
+        login_at: new Date().toISOString(),
+      };
+      saveLocalSession(session);
+
+      return { success: true, session };
+    } catch (err: any) {
+      console.error('Reset password error:', err);
+      return { success: false, error: err?.message || 'Erro ao redefinir senha.' };
+    }
+  },
+
+  // Update user security questions & birth date in settings
+  async updateSecurityInfo(params: {
+    userId: string;
+    birthDate: string;
+    securityQuestion: string;
+    securityAnswer: string;
+  }): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
+    const { userId, birthDate, securityQuestion, securityAnswer } = params;
+    const cleanDate = normalizeDate(birthDate);
+    const cleanAnswer = normalizeSecurityAnswer(securityAnswer);
+
+    if (!cleanDate) {
+      return { success: false, error: 'Informe sua data de nascimento.' };
+    }
+    if (!securityQuestion.trim() || !cleanAnswer) {
+      return { success: false, error: 'Selecione uma pergunta e preencha a resposta secreta.' };
+    }
+
+    try {
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.id === userId);
+      if (!user) return { success: false, error: 'Usuário não encontrado.' };
+
+      const now = new Date().toISOString();
+      user.birth_date = cleanDate;
+      user.security_question = securityQuestion.trim();
+      user.security_answer = cleanAnswer;
+      user.updated_at = now;
+      saveLocalUsers(localUsers);
+
+      const session = this.getCurrentSession();
+      if (session && session.user.id === userId) {
+        session.user.birth_date = cleanDate;
+        session.user.security_question = user.security_question;
+        session.user.updated_at = now;
+        saveLocalSession(session);
+      }
+
+      withTimeout(
+        updateDoc(doc(db, 'users', userId), {
+          birth_date: cleanDate,
+          security_question: user.security_question,
+          security_answer: cleanAnswer,
+          updated_at: now,
+        }),
+        1500
+      ).catch(() => {});
+
+      return { success: true, user: session?.user };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erro ao atualizar dados de segurança.' };
     }
   },
 

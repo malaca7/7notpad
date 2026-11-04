@@ -1,9 +1,23 @@
+export const SECURITY_QUESTIONS = [
+  'Qual o nome do seu primeiro animal de estimação?',
+  'Qual a cidade onde você nasceu?',
+  'Qual o nome da sua primeira escola?',
+  'Qual o nome de solteira da sua mãe?',
+  'Qual a sua comida ou prato favorito?',
+  'Qual o modelo do seu primeiro carro ou bicicleta?',
+  'Qual o seu time de futebol ou esporte favorito?',
+] as const;
+
+export type SecurityQuestion = typeof SECURITY_QUESTIONS[number];
+
 export interface UserProfile {
   id: string;
   full_name: string;
   username: string; // unique, lowercase
-  email: string; // unique, lowercase
-  email_verified: boolean;
+  email: string;
+  birth_date?: string; // YYYY-MM-DD
+  security_question?: string;
+  email_verified?: boolean;
   created_at: string;
   updated_at: string;
 }

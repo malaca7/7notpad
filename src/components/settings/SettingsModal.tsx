@@ -8,9 +8,9 @@ import { StorageService } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
 import { EmailService, getEmailConfig, saveEmailConfig, resolveEffectiveEmailConfig, DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID, DEFAULT_APPS_SCRIPT_URL } from '../../lib/emailService';
 import type { EmailProviderConfig } from '../../types/auth';
+import { SECURITY_QUESTIONS } from '../../types/auth';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../common/Toast';
-import { CodeInput } from '../auth/CodeInput';
 import { 
   Settings, 
   Type, 
@@ -35,7 +35,8 @@ import {
   Sparkles,
   Send,
   HelpCircle,
-  ExternalLink
+  ExternalLink,
+  Calendar
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -73,13 +74,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [usernameInput, setUsernameInput] = useState('');
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
 
-  // Email Change states
-  const [newEmailInput, setNewEmailInput] = useState('');
-  const [emailChangeStep, setEmailChangeStep] = useState<'request' | 'verify'>('request');
-  const [emailChangeCode, setEmailChangeCode] = useState('');
-  const [isSendingEmailCode, setIsSendingEmailCode] = useState(false);
-  const [isConfirmingEmailCode, setIsConfirmingEmailCode] = useState(false);
-
   // Password Change states
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -88,6 +82,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showNewPass, setShowNewPass] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
+  // Security Questions & Birth Date states
+  const [birthDateInput, setBirthDateInput] = useState(user?.birth_date || '');
+  const [securityQuestionInput, setSecurityQuestionInput] = useState<string>(user?.security_question || SECURITY_QUESTIONS[0]);
+  const [securityAnswerInput, setSecurityAnswerInput] = useState('');
+  const [isUpdatingSecurity, setIsUpdatingSecurity] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const ownerToken = getOrCreateOwnerToken();
 
@@ -95,6 +95,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (user) {
       setFullNameInput(user.full_name);
       setUsernameInput(user.username);
+      if (user.birth_date) setBirthDateInput(user.birth_date);
+      if (user.security_question) setSecurityQuestionInput(user.security_question);
     }
   }, [user]);
 
@@ -178,58 +180,39 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   // ----------------------------------------------------
-  // ETAPA 4: Request Email Change (6-digit code to new email)
+  // ETAPA 4: Update Security Questions & Birth Date
   // ----------------------------------------------------
-  const handleRequestEmailChange = async (e: React.FormEvent) => {
+  const handleUpdateSecurityInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
-    setIsSendingEmailCode(true);
-    try {
-      const res = await AuthService.requestEmailChange({
-        userId: user.id,
-        newEmail: newEmailInput
-      });
-
-      if (res.success) {
-        setEmailChangeStep('verify');
-        setEmailChangeCode('');
-        success('Código Enviado!', `Enviamos o código de 6 dígitos para o novo e-mail ${newEmailInput}.`);
-      } else {
-        error('Erro ao solicitar troca', res.error || 'Não foi possível solicitar a troca de e-mail.');
-      }
-    } finally {
-      setIsSendingEmailCode(false);
-    }
-  };
-
-  // ETAPA 4: Confirm Email Change
-  const handleConfirmEmailChange = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-
-    if (emailChangeCode.length !== 6) {
-      error('Código incompleto', 'Digite os 6 dígitos do código de confirmação.');
+    if (!birthDateInput) {
+      error('Data de nascimento necessária', 'Por favor, informe sua data de nascimento.');
       return;
     }
 
-    setIsConfirmingEmailCode(true);
+    if (!securityAnswerInput.trim()) {
+      error('Resposta secreta necessária', 'Digite uma resposta para a pergunta de segurança.');
+      return;
+    }
+
+    setIsUpdatingSecurity(true);
     try {
-      const res = await AuthService.confirmEmailChange({
-        currentEmail: user.email,
-        code: emailChangeCode
+      const res = await AuthService.updateSecurityInfo({
+        userId: user.id,
+        birthDate: birthDateInput,
+        securityQuestion: securityQuestionInput,
+        securityAnswer: securityAnswerInput,
       });
 
       if (res.success) {
-        success('E-mail alterado!', `Seu e-mail principal foi atualizado para ${res.newEmail}.`);
-        setEmailChangeStep('request');
-        setNewEmailInput('');
-        setEmailChangeCode('');
+        success('Dados de Segurança Salvos!', 'Sua data de nascimento e pergunta secreta foram atualizadas.');
+        setSecurityAnswerInput('');
       } else {
-        error('Código inválido', res.error || 'Não foi possível validar o código.');
+        error('Erro ao salvar', res.error || 'Não foi possível atualizar seus dados.');
       }
     } finally {
-      setIsConfirmingEmailCode(false);
+      setIsUpdatingSecurity(false);
     }
   };
 
@@ -618,72 +601,73 @@ function processarEnvio(e) {
                   </div>
                 </form>
 
-                {/* Section 2: Alterar E-mail com Confirmação por Código */}
-                <div className="p-4 rounded-2xl bg-white dark:bg-[#0f1118] border border-gray-200 dark:border-[#232838] space-y-3.5">
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-gray-100">
-                    <Mail className="w-4 h-4 text-purple-400" />
-                    Alterar E-mail (Exige Código de 6 Dígitos)
+                {/* Section 2: Pergunta de Segurança & Data de Nascimento (Recuperação de Senha) */}
+                <form onSubmit={handleUpdateSecurityInfo} className="p-4 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-3.5">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-100">
+                    <HelpCircle className="w-4 h-4 text-purple-400" />
+                    Pergunta de Segurança &amp; Data de Nascimento
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                    O e-mail principal só é alterado após você digitar o código de verificação enviado para o novo endereço.
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    Essas informações são usadas para alterar ou recuperar sua senha de forma simples e segura, sem depender de envio de e-mails.
                   </p>
 
-                  {emailChangeStep === 'request' ? (
-                    <form onSubmit={handleRequestEmailChange} className="space-y-3">
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                          Novo Endereço de E-mail
-                        </label>
-                        <input
-                          type="email"
-                          required
-                          value={newEmailInput}
-                          onChange={e => setNewEmailInput(e.target.value)}
-                          placeholder="novo.email@exemplo.com"
-                          className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                        />
-                      </div>
-                      <div className="flex justify-end">
-                        <button
-                          type="submit"
-                          disabled={isSendingEmailCode || !newEmailInput}
-                          className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
-                        >
-                          {isSendingEmailCode ? 'Enviando Código...' : 'Enviar Código para o Novo E-mail'}
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <form onSubmit={handleConfirmEmailChange} className="space-y-3 text-center">
-                      <p className="text-xs text-gray-400">
-                        Código enviado para <strong className="text-white">{newEmailInput}</strong>. Digite os 6 dígitos:
-                      </p>
-                      <div className="py-2">
-                        <CodeInput
-                          value={emailChangeCode}
-                          onChange={setEmailChangeCode}
-                          disabled={isConfirmingEmailCode}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between pt-1">
-                        <button
-                          type="button"
-                          onClick={() => setEmailChangeStep('request')}
-                          className="text-xs text-gray-400 hover:text-gray-200"
-                        >
-                          Cancelar troca
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={isConfirmingEmailCode || emailChangeCode.length !== 6}
-                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
-                        >
-                          {isConfirmingEmailCode ? 'Validando...' : 'Confirmar e Atualizar E-mail'}
-                        </button>
-                      </div>
-                    </form>
-                  )}
-                </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-300 flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-brand-400" />
+                        Data de Nascimento
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={birthDateInput}
+                        onChange={e => setBirthDateInput(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-gray-300">
+                        Pergunta Secreta
+                      </label>
+                      <select
+                        value={securityQuestionInput}
+                        onChange={e => setSecurityQuestionInput(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+                      >
+                        {SECURITY_QUESTIONS.map((q, idx) => (
+                          <option key={idx} value={q} className="bg-[#0f0f0f] text-gray-100">
+                            {q}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-300">
+                      Resposta Secreta (nova ou confirmação)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={securityAnswerInput}
+                      onChange={e => setSecurityAnswerInput(e.target.value)}
+                      placeholder="Digite sua resposta secreta..."
+                      className="w-full px-3 py-2 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+                    />
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="submit"
+                      disabled={isUpdatingSecurity || !birthDateInput || !securityAnswerInput.trim()}
+                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+                    >
+                      {isUpdatingSecurity ? 'Salvando...' : 'Salvar Dados de Segurança'}
+                    </button>
+                  </div>
+                </form>
 
                 {/* Section 3: Alterar Senha mediante Senha Atual */}
                 <form onSubmit={handleChangePassword} className="p-4 rounded-2xl bg-white dark:bg-[#0f1118] border border-gray-200 dark:border-[#232838] space-y-3.5">
