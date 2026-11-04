@@ -12,7 +12,8 @@ import {
   LogOut,
   ChevronDown,
   Sparkles,
-  Mail
+  Mail,
+  Home
 } from 'lucide-react';
 import { exportNotesToJson } from '../../lib/exportImport';
 
@@ -21,6 +22,7 @@ interface NavbarProps {
   onOpenSettings: (tab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup') => void;
   onOpenAuthModal: () => void;
   totalNotes: number;
+  onReturnHome?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -28,6 +30,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettings,
   onOpenAuthModal,
   totalNotes,
+  onReturnHome,
 }) => {
   const { theme, toggleTheme } = useTheme();
   const { user, isAuthenticated, logout } = useAuth();
@@ -58,12 +61,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           <Menu className="w-4 h-4" />
         </button>
 
-        <div className="flex items-center gap-2 md:hidden">
+        <div 
+          onClick={onReturnHome}
+          className={`flex items-center gap-2 md:hidden ${onReturnHome ? 'cursor-pointer active:opacity-75' : ''}`}
+          title={onReturnHome ? 'Ir para Tela de Início' : undefined}
+        >
           <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white font-black text-xs">
             7
           </div>
           <span className="font-bold text-sm text-gray-100">7NotPad</span>
         </div>
+
+        {onReturnHome && (
+          <button
+            type="button"
+            onClick={onReturnHome}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#1c1c1c] bg-[#080808] hover:bg-[#141414] text-xs font-medium text-gray-300 hover:text-white transition-colors"
+            title="Voltar para a Tela de Início"
+          >
+            <Home className="w-3.5 h-3.5 text-brand-400" />
+            <span>Tela de Início</span>
+          </button>
+        )}
       </div>
 
       {/* Sync Status Badge & Action Controls */}

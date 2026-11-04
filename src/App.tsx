@@ -10,11 +10,14 @@ import { PublicNoteView } from './components/share/PublicNoteView';
 import { BrowserWarningBanner } from './components/settings/BrowserWarningBanner';
 import { AuthModal, type AuthModalView } from './components/auth/AuthModal';
 import { EmailNotificationToast } from './components/auth/EmailNotificationToast';
+import { LandingHome } from './components/home/LandingHome';
 import { useNotes } from './hooks/useNotes';
+import { useAuth } from './hooks/useAuth';
 import { getLocalNotes } from './lib/storage';
-import { FileText, Plus, Share2, Copy, Check, Settings } from 'lucide-react';
+import { FileText, Plus, Share2, Copy, Check, Settings, Home } from 'lucide-react';
 
 export function MainLayout() {
+  const { isAuthenticated } = useAuth();
   const {
     notes,
     activeNote,
@@ -28,6 +31,12 @@ export function MainLayout() {
     updateShare,
     loadNotes,
   } = useNotes();
+
+  const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(() => {
+    const path = window.location.pathname;
+    const hash = window.location.hash;
+    return Boolean(path.includes('/notpad/') || hash.includes('/notpad/') || path.includes('/n/'));
+  });
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -203,6 +212,43 @@ export function MainLayout() {
     );
   }
 
+  // If user is unlogged and hasn't explicitly entered the workspace, display the Clean Landing Home!
+  if (!isAuthenticated && !hasEnteredWorkspace) {
+    return (
+      <>
+        <LandingHome
+          onStartWriting={() => {
+            if (!activeNote && notes.length === 0) {
+              createNote();
+            }
+            setHasEnteredWorkspace(true);
+          }}
+          onOpenAuth={(view) => {
+            setAuthModalView(view);
+            setIsAuthModalOpen(true);
+          }}
+          localNotesCount={notes.length}
+        />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialView={authModalView}
+          initialEmail={authEmail}
+          resetToken={resetTokenParam}
+          onSuccess={() => {
+            loadNotes();
+            setHasEnteredWorkspace(true);
+          }}
+          onOpenSettings={(tab) => {
+            if (tab) setSettingsInitialTab(tab);
+            setIsSettingsModalOpen(true);
+          }}
+        />
+        <EmailNotificationToast />
+      </>
+    );
+  }
+
   return (
     <div className="flex flex-col h-[100dvh] w-screen bg-black text-gray-100 overflow-hidden font-sans">
       {/* Browser Data Persistence Notice */}
@@ -220,6 +266,7 @@ export function MainLayout() {
           setIsAuthModalOpen(true);
         }}
         totalNotes={notes.length}
+        onReturnHome={!isAuthenticated ? () => setHasEnteredWorkspace(false) : undefined}
       />
 
       {/* Main Workspace Body */}
@@ -268,6 +315,17 @@ export function MainLayout() {
 
       {/* Dedicated Mobile Bottom Navigation Bar */}
       <nav className="md:hidden h-14 border-t border-[#1c1c1c] bg-[#050505]/95 backdrop-blur-md px-2 flex items-center justify-around shrink-0 z-20 select-none">
+        {!isAuthenticated && (
+          <button
+            type="button"
+            onClick={() => setHasEnteredWorkspace(false)}
+            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium text-gray-400 active:text-white transition-colors"
+          >
+            <Home className="w-4 h-4 text-brand-400" />
+            <span>Início</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setIsMobileSidebarOpen(prev => !prev)}

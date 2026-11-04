@@ -19,7 +19,7 @@ export function useAuth() {
   }, []);
 
   const user: UserProfile | null = session ? session.user : null;
-  const isAuthenticated = Boolean(session && session.user && session.user.email_verified);
+  const isAuthenticated = Boolean(session && session.user);
 
   return {
     session,
