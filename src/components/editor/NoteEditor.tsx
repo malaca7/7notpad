@@ -18,7 +18,9 @@ import {
   AlertCircle, 
   Share2, 
   Pin, 
-  Clock
+  Clock,
+  Copy,
+  Check
 } from 'lucide-react';
 
 interface NoteEditorProps {
@@ -39,8 +41,23 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const { settings } = useEditorSettings();
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [title, setTitle] = useState(note.title);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const onUpdateNoteRef = useRef(onUpdateNote);
   onUpdateNoteRef.current = onUpdateNote;
+
+  const getNoteUrl = () => {
+    const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+    const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+    return `${window.location.origin}${cleanBase}/notpad/${note.id}`;
+  };
+
+  const handleCopyNoteUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(getNoteUrl());
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2000);
+    } catch {}
+  };
 
   // Sync internal title when note.id or note.title changes
   useEffect(() => {
@@ -177,6 +194,21 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Header Right Actions */}
         <div className="flex items-center gap-2">
+          {/* Quick Copy Unique Note URL Pill */}
+          <button
+            type="button"
+            onClick={handleCopyNoteUrl}
+            title={`Copiar URL única: ${getNoteUrl()}`}
+            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#141720] hover:bg-gray-100 dark:hover:bg-[#1c202c] text-[11px] font-mono text-gray-500 dark:text-gray-400 transition-colors"
+          >
+            <span className="truncate max-w-[200px]">/notpad/{note.id}</span>
+            {copiedUrl ? (
+              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            ) : (
+              <Copy className="w-3.5 h-3.5 text-brand-400 shrink-0" />
+            )}
+          </button>
+
           {/* Pin Button */}
           {onTogglePin && (
             <button

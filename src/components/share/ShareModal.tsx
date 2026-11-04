@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import type { Note, NoteShare } from '../../types/note';
 import { StorageService } from '../../lib/storage';
-import { generateSalt, hashPassword, generateRandomSlug, slugify } from '../../lib/crypto';
-import { generatePortablePayload } from '../../lib/portableShare';
+import { generateSalt, hashPassword, slugify } from '../../lib/crypto';
 import { useToast } from '../common/Toast';
 import confetti from 'canvas-confetti';
 import { 
@@ -18,8 +17,7 @@ import {
   EyeOff, 
   AlertCircle,
   Link as LinkIcon,
-  Cloud,
-  Globe2
+  Cloud
 } from 'lucide-react';
 
 interface ShareModalProps {
@@ -39,7 +37,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   // Always default to true when sharing a note so the user doesn't copy an inactive link!
   const [isActive, setIsActive] = useState<boolean>(note.share ? note.share.is_active : true);
-  const [slug, setSlug] = useState<string>(note.share?.custom_slug || '');
+  const [slug, setSlug] = useState<string>(note.share?.custom_slug || note.id);
   const [isPasswordProtected, setIsPasswordProtected] = useState<boolean>(
     note.share?.is_password_protected ?? false
   );
@@ -48,22 +46,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [copied, setCopied] = useState<boolean>(false);
   const [isSlugConflict, setIsSlugConflict] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [linkType, setLinkType] = useState<'short' | 'universal'>('short');
-  const [portableHash, setPortableHash] = useState<string>('');
 
   // Sync state when modal opens or note changes
   useEffect(() => {
     if (isOpen) {
       if (note.share) {
         setIsActive(note.share.is_active);
-        setSlug(note.share.custom_slug);
+        const titleSlug = note.title.trim() ? slugify(note.title) : '';
+        const initialSlug =
+          note.share.custom_slug && note.share.custom_slug !== titleSlug
+            ? note.share.custom_slug
+            : note.id;
+        setSlug(initialSlug);
         setIsPasswordProtected(note.share.is_password_protected);
         setPassword('');
       } else {
-        // Default to active!
+        // Default to active and use the unique ID of the note!
         setIsActive(true);
-        const initialSlug = note.title.trim() ? slugify(note.title) : generateRandomSlug('nota');
-        setSlug(initialSlug || generateRandomSlug('nota'));
+        setSlug(note.id);
         setIsPasswordProtected(false);
         setPassword('');
       }
@@ -71,27 +71,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setCopied(false);
     }
   }, [isOpen, note]);
-
-  // Generate portable hash whenever note, slug, or password changes
-  useEffect(() => {
-    if (!isOpen) return;
-    const cleanSlug = slugify(slug) || 'nota';
-    const mockShare: NoteShare = {
-      id: note.share?.id || 'temp',
-      note_id: note.id,
-      custom_slug: cleanSlug,
-      is_password_protected: isPasswordProtected,
-      password_salt: note.share?.password_salt,
-      password_hash: note.share?.password_hash,
-      is_active: true,
-      created_at: note.created_at,
-      updated_at: new Date().toISOString()
-    };
-
-    generatePortablePayload(note, mockShare, password.trim() || undefined)
-      .then(p => setPortableHash(p))
-      .catch(() => setPortableHash(''));
-  }, [isOpen, note, slug, isPasswordProtected, password]);
 
   // Check slug availability when slug changes
   useEffect(() => {
@@ -115,25 +94,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setSlug(raw);
   };
 
-  const handleGenerateRandomSlug = () => {
-    const newSlug = generateRandomSlug(note.title ? slugify(note.title).slice(0, 15) : 'nota');
-    setSlug(newSlug);
+  const handleUseNoteUniqueId = () => {
+    setSlug(note.id);
   };
 
   const getCleanBaseUrl = () => {
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
     const origin = window.location.origin;
     const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
-    const cleanSlug = slugify(slug) || 'slug';
+    const cleanSlug = slugify(slug) || note.id;
     return `${origin}${cleanBase}/notpad/${cleanSlug}`;
   };
 
-  const getShareUrl = (type = linkType) => {
-    const shortUrl = getCleanBaseUrl();
-    if (type === 'universal' && portableHash) {
-      return `${shortUrl}#data=${portableHash}`;
-    }
-    return shortUrl;
+  const getShareUrl = () => {
+    return getCleanBaseUrl();
   };
 
   // Helper to save share state to storage/Firebase
@@ -196,14 +170,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setIsSaving(true);
     try {
       // 1. Automatically activate and save the share!
-      const saveRes = await executeSave(true);
-      
-      // Determine best URL: if Cloud returned error, use universal link with #data
-      let urlToCopy = getShareUrl();
-      if (!saveRes.cloudSynced && portableHash) {
-        urlToCopy = getShareUrl('universal');
-      }
+      await executeSave(true);
 
+      const urlToCopy = getShareUrl();
       await navigator.clipboard.writeText(urlToCopy);
       setCopied(true);
       confetti({
@@ -212,15 +181,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         origin: { y: 0.8 }
       });
 
-      if (!saveRes.cloudSynced) {
-        success('Link copiado!', 'Link universal com dados copiado (funciona em qualquer navegador mesmo sem Firebase ativo).');
-      } else {
-        success('Link copiado!', 'Link /notpad/' + slugify(slug) + ' copiado para a área de transferência.');
-      }
+      const cleanSlug = slugify(slug) || note.id;
+      success('Link copiado!', `URL /notpad/${cleanSlug} copiada para a área de transferência.`);
 
       setTimeout(() => setCopied(false), 2500);
     } catch {
       error('Erro ao copiar link', 'Não foi possível copiar automaticamente.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleOpenPublicView = async () => {
+    setIsSaving(true);
+    try {
+      await executeSave(true);
+      window.open(`${getShareUrl()}?view=public`, '_blank', 'noopener,noreferrer');
     } finally {
       setIsSaving(false);
     }
@@ -316,7 +292,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         {/* Custom Slug Config */}
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
-            Identificador do Link (/notpad/:id)
+            ID Único do Bloco de Nota (/notpad/:id)
           </label>
           <div className="flex items-center gap-2">
             <div className="flex-1 flex items-center bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-brand-500/50">
@@ -327,14 +303,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 type="text"
                 value={slug}
                 onChange={handleSlugChange}
-                placeholder="minha-reuniao"
+                placeholder={note.id}
                 className="flex-1 bg-transparent text-sm text-gray-900 dark:text-gray-100 outline-none font-mono"
               />
             </div>
             <button
               type="button"
-              onClick={handleGenerateRandomSlug}
-              title="Gerar identificador aleatório"
+              onClick={handleUseNoteUniqueId}
+              title="Restaurar ID único original da nota"
               className="p-2.5 rounded-xl border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#181b24] hover:bg-gray-100 dark:hover:bg-[#202430] text-gray-600 dark:text-gray-300 transition-colors"
             >
               <Sparkles className="w-4 h-4 text-brand-400" />
@@ -403,51 +379,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
                 <LinkIcon className="w-4 h-4 text-brand-400" />
-                Opções de Link para Envio:
+                URL Única do Bloco de Nota:
               </span>
               <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
                 <Cloud className="w-3.5 h-3.5" />
                 Nuvem Ativa
               </span>
-            </div>
-
-            {/* Link Format Switcher */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setLinkType('short')}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border text-left transition-all ${
-                  linkType === 'short'
-                    ? 'border-brand-500 bg-brand-500/10 text-brand-400 ring-1 ring-brand-500/30'
-                    : 'border-gray-200 dark:border-[#232838] text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Cloud className="w-3.5 h-3.5" />
-                  <span>Link Curto Direto</span>
-                </div>
-                <div className="text-[10px] opacity-75 font-normal mt-0.5 font-mono">
-                  /notpad/{slugify(slug) || 'id'}
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLinkType('universal')}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border text-left transition-all ${
-                  linkType === 'universal'
-                    ? 'border-brand-500 bg-brand-500/10 text-brand-400 ring-1 ring-brand-500/30'
-                    : 'border-gray-200 dark:border-[#232838] text-gray-500 hover:text-gray-300'
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Globe2 className="w-3.5 h-3.5 text-purple-400" />
-                  <span>Link Portátil Universal</span>
-                </div>
-                <div className="text-[10px] opacity-75 font-normal mt-0.5">
-                  Abre garantido em qualquer aparelho
-                </div>
-              </button>
             </div>
 
             {/* URL Box */}
@@ -466,15 +403,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 {copied ? 'Copiado!' : 'Copiar Link'}
               </button>
-              <a
-                href={getShareUrl()}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={handleOpenPublicView}
+                disabled={isSaving}
                 className="p-2 border border-gray-200 dark:border-[#232838] bg-white dark:bg-[#11131a] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-600 dark:text-gray-300 rounded-xl transition-colors shrink-0"
                 title="Abrir página pública"
               >
                 <ExternalLink className="w-4 h-4" />
-              </a>
+              </button>
             </div>
           </div>
         )}

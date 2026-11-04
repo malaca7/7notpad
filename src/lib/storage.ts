@@ -1,6 +1,7 @@
 import type { Note, NoteShare } from '../types/note';
 import { getOrCreateOwnerToken } from './crypto';
 import { FirebaseService } from './firebase';
+import { CloudShareService } from './cloudShare';
 import { parsePortablePayload, decryptContent, type PortableNoteData } from './portableShare';
 import { AuthService } from './authService';
 
@@ -78,8 +79,9 @@ export function saveLocalShares(shares: Record<string, NoteShare>): void {
   }
 }
 
-// Temporary in-memory cache for decrypted portable data
+// Temporary in-memory cache for decrypted portable or cloud-protected data
 let activePortableData: (PortableNoteData & { slug: string }) | null = null;
+let activeCloudProtectedContent: { slug: string; content: string } | null = null;
 
 /**
  * Storage Service: combines Local-First with Firebase Firestore
@@ -134,6 +136,7 @@ export const StorageService = {
             updatedLocally = true;
           }
           FirebaseService.saveNote(localNote).catch(() => {});
+          CloudShareService.syncNoteToCloud(localNote).catch(() => {});
         }
         if (updatedLocally) {
           saveLocalNotes(freshLocalNotes);
@@ -185,7 +188,8 @@ export const StorageService = {
     }
     saveLocalNotes(localNotes);
 
-    // 2. Push to Firebase Firestore in background (non-blocking so UI never hangs on "Salvando...")
+    // 2. Push to Cloud & Firebase Firestore in background (non-blocking so UI never hangs on "Salvando...")
+    CloudShareService.syncNoteToCloud(updatedNote).catch(() => {});
     FirebaseService.saveNote(updatedNote).catch((err) => {
       console.warn('Firebase background saveNote warning:', err);
     });
@@ -225,6 +229,7 @@ export const StorageService = {
     // 1. Local storage persistence immediately
     const localShares = getLocalShares();
     localShares[share.custom_slug] = share;
+    localShares[share.note_id] = share;
     saveLocalShares(localShares);
 
     const localNotes = getLocalNotes();
@@ -233,7 +238,9 @@ export const StorageService = {
       note.share = share;
       saveLocalNotes(localNotes);
 
-      // 2. Try saving to Firebase Firestore (with timeout), fallback to local success if offline
+      // 2. Sync to CloudShareService & Firebase so /notpad/<ID> works across browsers without #data=
+      await CloudShareService.syncNoteToCloud(note, share);
+
       const res = await FirebaseService.saveShare(share, note);
       if (!res.success && res.error?.includes('já está em uso')) {
         return res;
@@ -253,10 +260,20 @@ export const StorageService = {
     }
 
     const localNotes = getLocalNotes();
-    const note = localNotes.find(n => n.share?.custom_slug === slug);
+    const note = localNotes.find(n => n.share?.custom_slug === slug || n.id === slug);
     if (note) {
+      const revokedShare: NoteShare = {
+        id: note.share?.id || note.id,
+        note_id: note.id,
+        custom_slug: slug,
+        is_password_protected: false,
+        is_active: false,
+        created_at: note.created_at,
+        updated_at: new Date().toISOString(),
+      };
       note.share = null;
       saveLocalNotes(localNotes);
+      CloudShareService.syncNoteToCloud(note, revokedShare).catch(() => {});
     }
 
     // Revoke from Firebase in background
@@ -280,7 +297,7 @@ export const StorageService = {
     return false;
   },
 
-  // Fetch Public Shared Note by slug (for ANY visitor in ANY browser!)
+  // Fetch Public Shared Note by slug or unique note ID (for ANY visitor in ANY browser!)
   async fetchPublicNote(slug: string): Promise<{
     found: boolean;
     share?: NoteShare;
@@ -291,7 +308,57 @@ export const StorageService = {
   }> {
     let cloudError: string | undefined = undefined;
 
-    // 1. Query Firebase Firestore first (live global cloud database!)
+    // 1. Local shares & local notes fast check (same browser, by note.id or custom_slug)
+    const localShares = getLocalShares();
+    const localNotes = getLocalNotes();
+    const matchingLocalNote = localNotes.find(
+      (n) => n.id === slug || n.share?.custom_slug === slug
+    );
+    const localShare =
+      localShares[slug] ||
+      matchingLocalNote?.share ||
+      (matchingLocalNote
+        ? {
+            id: matchingLocalNote.id,
+            note_id: matchingLocalNote.id,
+            custom_slug: matchingLocalNote.id,
+            is_password_protected: false,
+            is_active: true,
+            created_at: matchingLocalNote.created_at,
+            updated_at: matchingLocalNote.updated_at,
+          }
+        : undefined);
+
+    if (localShare && localShare.is_active === false) {
+      return {
+        found: false,
+        error: 'O compartilhamento desta nota foi desativado pelo proprietário.',
+      };
+    }
+
+    // 2. Query CloudShareService (works globally in any browser by /notpad/<ID_UNICO>)
+    try {
+      const cloudRes = await CloudShareService.fetchNoteFromCloud(slug);
+      if (cloudRes.found && cloudRes.share) {
+        if (cloudRes.rawContent) {
+          activeCloudProtectedContent = { slug, content: cloudRes.rawContent };
+        }
+        return {
+          found: true,
+          isCloudConfigured: true,
+          share: cloudRes.share,
+          note: cloudRes.note,
+        };
+      }
+      if (cloudRes.error) {
+        return {
+          found: false,
+          error: cloudRes.error,
+        };
+      }
+    } catch {}
+
+    // 3. Query Firebase Firestore
     try {
       const firebaseResult = await FirebaseService.fetchPublicNote(slug);
       if (firebaseResult.found && firebaseResult.share) {
@@ -317,12 +384,33 @@ export const StorageService = {
       console.warn('Firebase fetch public note error:', err);
     }
 
-    // 2. Check if there is a portable payload in URL hash or query string
+    // 4. Local note match fallback (same browser)
+    if (localShare && localShare.is_active && matchingLocalNote) {
+      return {
+        found: true,
+        share: localShare,
+        note: {
+          id: matchingLocalNote.id,
+          title: matchingLocalNote.title,
+          content: localShare.is_password_protected ? '' : matchingLocalNote.content,
+          created_at: matchingLocalNote.created_at,
+          updated_at: matchingLocalNote.updated_at,
+          attachments: matchingLocalNote.attachments,
+        },
+      };
+    }
+
+    // 5. Legacy fallback: Check if there is a portable payload in URL hash or query string
     const hash = window.location.hash;
     const search = window.location.search;
     const portableData = await parsePortablePayload(hash || search);
 
     if (portableData) {
+      // Clean up ugly #data=... from the browser URL bar immediately!
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+
       activePortableData = { ...portableData, slug };
       try {
         sessionStorage.setItem(PORTABLE_CACHE_KEY + slug, JSON.stringify(portableData));
@@ -354,28 +442,6 @@ export const StorageService = {
       };
     }
 
-    // 3. Local shares & local notes fallback (same browser)
-    const localShares = getLocalShares();
-    const localNotes = getLocalNotes();
-    const share = localShares[slug] || localNotes.find(n => n.share?.custom_slug === slug)?.share;
-    if (share && share.is_active) {
-      const note = localNotes.find(n => n.id === share.note_id || n.share?.custom_slug === slug);
-      if (note) {
-        return {
-          found: true,
-          share,
-          note: {
-            id: note.id,
-            title: note.title,
-            content: share.is_password_protected ? '' : note.content,
-            created_at: note.created_at,
-            updated_at: note.updated_at,
-            attachments: note.attachments
-          }
-        };
-      }
-    }
-
     return { 
       found: false, 
       error: cloudError || 'Nota não encontrada.',
@@ -385,13 +451,18 @@ export const StorageService = {
 
   // Retrieve protected content after valid password verification
   async unlockProtectedNoteContent(slug: string, passwordInput?: string): Promise<string | null> {
-    // 1. Firebase Firestore
+    // 1. CloudShareService cached protected content
+    if (activeCloudProtectedContent && activeCloudProtectedContent.slug === slug) {
+      return activeCloudProtectedContent.content;
+    }
+
+    // 2. Firebase Firestore
     const cloudContent = await FirebaseService.unlockProtectedNoteContent(slug);
     if (cloudContent) {
       return cloudContent;
     }
 
-    // 2. Portable data with AES decryption
+    // 3. Portable data with AES decryption
     if (activePortableData && activePortableData.slug === slug) {
       if (activePortableData.encrypted_content && activePortableData.encryption_iv && passwordInput && activePortableData.password_salt) {
         try {
@@ -411,15 +482,15 @@ export const StorageService = {
       }
     }
 
-    // 3. Local fallback
+    // 4. Local fallback (by note.id or custom_slug)
+    const localNotes = getLocalNotes();
     const localShares = getLocalShares();
     const share = localShares[slug];
-    if (share) {
-      const localNotes = getLocalNotes();
-      const note = localNotes.find(n => n.id === share.note_id);
-      if (note) {
-        return note.content;
-      }
+    const note = localNotes.find(
+      (n) => n.id === slug || n.share?.custom_slug === slug || (share && n.id === share.note_id)
+    );
+    if (note) {
+      return note.content;
     }
 
     return null;

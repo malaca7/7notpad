@@ -11,6 +11,7 @@ import { BrowserWarningBanner } from './components/settings/BrowserWarningBanner
 import { AuthModal, type AuthModalView } from './components/auth/AuthModal';
 import { EmailNotificationToast } from './components/auth/EmailNotificationToast';
 import { useNotes } from './hooks/useNotes';
+import { getLocalNotes } from './lib/storage';
 
 export function MainLayout() {
   const {
@@ -58,18 +59,63 @@ export function MainLayout() {
     // Check hash fallback: #/notpad/ or #/n/
     if (hash.includes('#/notpad/')) {
       const parts = hash.split('#/notpad/');
-      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      const slug = parts[parts.length - 1]?.split('#')[0]?.replace(/\/+$/, '').trim();
       if (slug) return slug;
     }
     if (hash.includes('#/n/')) {
       const parts = hash.split('#/n/');
-      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      const slug = parts[parts.length - 1]?.split('#')[0]?.replace(/\/+$/, '').trim();
       if (slug) return slug;
     }
     return null;
   };
 
-  const [publicSlug, setPublicSlug] = useState<string | null>(getSlugFromLocation);
+  const resolveRoute = () => {
+    const slug = getSlugFromLocation();
+    if (!slug) {
+      return { publicSlug: null as string | null, editorNoteId: null as string | null };
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const forcePublic = params.get('view') === 'public' || window.location.hash.includes('data=');
+
+    if (!forcePublic) {
+      const localNotes = getLocalNotes();
+      const ownedNote = localNotes.find((n) => n.id === slug);
+      if (ownedNote && !(ownedNote.share?.is_active && ownedNote.share?.is_password_protected)) {
+        return { publicSlug: null as string | null, editorNoteId: ownedNote.id };
+      }
+    }
+
+    return { publicSlug: slug, editorNoteId: null as string | null };
+  };
+
+  const [publicSlug, setPublicSlug] = useState<string | null>(() => resolveRoute().publicSlug);
+
+  // Sync initial URL note ID into activeNoteId if owner opened /notpad/<note.id>
+  useEffect(() => {
+    const route = resolveRoute();
+    if (route.editorNoteId) {
+      setActiveNoteId(route.editorNoteId);
+    }
+  }, [setActiveNoteId]);
+
+  // Keep browser address bar at /notpad/<ID_UNICO_DO_BLOCO_DE_NOTA> when editing a note
+  useEffect(() => {
+    if (publicSlug || !activeNoteId) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('reset_token')) return;
+
+      const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+      const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+      const targetPath = `${cleanBase}/notpad/${activeNoteId}`;
+
+      if (window.location.pathname !== targetPath || window.location.hash.includes('data=')) {
+        window.history.replaceState({}, '', targetPath);
+      }
+    } catch {}
+  }, [activeNoteId, publicSlug]);
 
   // Check URL parameters for reset_token or password-reset hash
   useEffect(() => {
@@ -89,7 +135,11 @@ export function MainLayout() {
 
   useEffect(() => {
     const handleLocationChange = () => {
-      setPublicSlug(getSlugFromLocation());
+      const route = resolveRoute();
+      setPublicSlug(route.publicSlug);
+      if (route.editorNoteId) {
+        setActiveNoteId(route.editorNoteId);
+      }
     };
 
     window.addEventListener('popstate', handleLocationChange);
@@ -98,11 +148,13 @@ export function MainLayout() {
       window.removeEventListener('popstate', handleLocationChange);
       window.removeEventListener('hashchange', handleLocationChange);
     };
-  }, []);
+  }, [setActiveNoteId]);
 
   const handleGoHome = () => {
-    const basePath = (import.meta as any).env?.BASE_URL || '/';
-    window.history.pushState({}, '', basePath);
+    const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+    const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+    const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : baseUrl;
+    window.history.pushState({}, '', targetPath);
     setPublicSlug(null);
   };
 
