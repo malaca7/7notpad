@@ -68,15 +68,20 @@ async function lookupCloudObjectIdFromKV(slug: string): Promise<string> {
 async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | null): Promise<boolean> {
   try {
     const now = new Date().toISOString();
-    const effectiveShare: NoteShare = explicitShare ?? note.share ?? {
-      id: note.id,
-      note_id: note.id,
-      custom_slug: note.id,
-      is_password_protected: false,
-      is_active: true,
-      created_at: note.created_at,
-      updated_at: note.updated_at || now,
-      view_count: 0,
+    const effectiveShare: NoteShare = {
+      ...(explicitShare ?? note.share ?? {
+        id: note.id,
+        note_id: note.id,
+        custom_slug: note.id,
+        is_password_protected: false,
+        is_active: true,
+        created_at: note.created_at,
+        updated_at: note.updated_at || now,
+        view_count: 0,
+      }),
+      owner_token: note.owner_token,
+      owner_user_id: note.user_id,
+      owner_username: note.owner_username,
     };
 
     const payload = {
@@ -88,6 +93,9 @@ async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | nu
         content: note.content || '',
         created_at: note.created_at,
         updated_at: note.updated_at || now,
+        owner_token: note.owner_token,
+        user_id: note.user_id,
+        owner_username: note.owner_username,
         attachments: note.attachments || [],
       },
     };
@@ -280,12 +288,118 @@ export const CloudShareService = {
           content: isProtected ? '' : rawContent,
           created_at: data.note.created_at,
           updated_at: data.note.updated_at,
+          owner_token: data.note.owner_token || share.owner_token,
+          user_id: data.note.user_id || share.owner_user_id,
+          owner_username: data.note.owner_username || share.owner_username,
           attachments: data.note.attachments || [],
         },
       };
     } catch (err) {
       console.warn('CloudShareService.fetchNoteFromCloud error:', err);
       return { found: false };
+    }
+  },
+
+  /**
+   * Sync a public platform user profile (@username) so all users can discover and share notes with @username
+   */
+  async syncPlatformUser(user: { id: string; username: string; full_name: string }): Promise<void> {
+    try {
+      const dirKey = '7notpad_users_directory_v1';
+      let objectId = await lookupCloudObjectIdFromKV(dirKey);
+      let existingUsers: Array<{ id: string; username: string; full_name: string }> = [
+        { id: 'usr_malaca_admin', username: 'malaca', full_name: 'Malaca' },
+      ];
+
+      if (objectId) {
+        try {
+          const getRes = await withTimeout(fetch(`${OBJECTS_API_URL}/${objectId}`, { cache: 'no-store' }));
+          if (getRes.ok) {
+            const json = await getRes.json();
+            if (Array.isArray(json?.data?.users)) {
+              existingUsers = json.data.users;
+            }
+          } else {
+            objectId = '';
+          }
+        } catch {
+          objectId = '';
+        }
+      }
+
+      const cleanUsername = user.username.trim().toLowerCase().replace(/^@+/, '');
+      const filtered = existingUsers.filter((u) => u.username.toLowerCase() !== cleanUsername);
+      filtered.unshift({
+        id: user.id,
+        username: cleanUsername,
+        full_name: user.full_name || cleanUsername,
+      });
+
+      if (objectId) {
+        const putRes = await withTimeout(
+          fetch(`${OBJECTS_API_URL}/${objectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: dirKey,
+              data: { users: filtered },
+            }),
+          })
+        );
+        if (!putRes.ok) objectId = '';
+      }
+
+      if (!objectId) {
+        const postRes = await withTimeout(
+          fetch(OBJECTS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: dirKey,
+              data: { users: filtered },
+            }),
+          })
+        );
+        if (postRes.ok) {
+          const postData = await postRes.json();
+          objectId = postData?.id || '';
+          if (objectId) {
+            await withTimeout(
+              fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${dirKey}/${objectId}`, {
+                method: 'POST',
+              })
+            );
+          }
+        }
+      }
+    } catch {}
+  },
+
+  /**
+   * Fetch public platform users directory (@malaca + registered users)
+   */
+  async fetchPlatformUsers(): Promise<Array<{ id: string; username: string; full_name: string }>> {
+    const fallback = [{ id: 'usr_malaca_admin', username: 'malaca', full_name: 'Malaca' }];
+    try {
+      const dirKey = '7notpad_users_directory_v1';
+      const objectId = await lookupCloudObjectIdFromKV(dirKey);
+      if (!objectId) return fallback;
+
+      const res = await withTimeout(fetch(`${OBJECTS_API_URL}/${objectId}`, { cache: 'no-store' }));
+      if (!res.ok) return fallback;
+      const json = await res.json();
+      if (Array.isArray(json?.data?.users)) {
+        const map = new Map<string, { id: string; username: string; full_name: string }>();
+        for (const u of [...fallback, ...json.data.users]) {
+          if (u && u.username) {
+            map.set(u.username.toLowerCase(), u);
+          }
+        }
+        return Array.from(map.values());
+      }
+      return fallback;
+    } catch {
+      return fallback;
     }
   },
 };

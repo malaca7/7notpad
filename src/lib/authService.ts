@@ -19,6 +19,7 @@ import {
   hashToken 
 } from './crypto';
 import { EmailService } from './emailService';
+import { CloudShareService } from './cloudShare';
 import type { 
   UserProfile, 
   AuthSession, 
@@ -172,6 +173,55 @@ export const AuthService = {
     return session ? session.user : null;
   },
 
+  // Get list of platform users synchronously (always includes @malaca + registered local users)
+  getPlatformUsers(): Array<{ id: string; username: string; full_name: string }> {
+    const map = new Map<string, { id: string; username: string; full_name: string }>();
+    // Built-in platform admin @malaca
+    map.set('malaca', { id: 'usr_malaca_admin', username: 'malaca', full_name: 'Malaca' });
+
+    const currentUser = this.getCurrentUser();
+    if (currentUser && currentUser.username) {
+      map.set(currentUser.username.toLowerCase(), {
+        id: currentUser.id,
+        username: currentUser.username.toLowerCase(),
+        full_name: currentUser.full_name || currentUser.username,
+      });
+    }
+
+    for (const u of getLocalUsers()) {
+      if (u && u.username) {
+        map.set(u.username.toLowerCase(), {
+          id: u.id,
+          username: u.username.toLowerCase(),
+          full_name: u.full_name || u.username,
+        });
+      }
+    }
+
+    return Array.from(map.values());
+  },
+
+  // Fetch merged platform users from local + cloud directory
+  async fetchPlatformUsers(): Promise<Array<{ id: string; username: string; full_name: string }>> {
+    const map = new Map<string, { id: string; username: string; full_name: string }>();
+    for (const u of this.getPlatformUsers()) {
+      map.set(u.username.toLowerCase(), u);
+    }
+    try {
+      const cloudUsers = await CloudShareService.fetchPlatformUsers();
+      for (const u of cloudUsers) {
+        if (u && u.username) {
+          map.set(u.username.toLowerCase(), {
+            id: u.id,
+            username: u.username.toLowerCase(),
+            full_name: u.full_name || u.username,
+          });
+        }
+      }
+    } catch {}
+    return Array.from(map.values());
+  },
+
   // ----------------------------------------------------
   // ETAPA 1 — Cadastro de Usuários (Zero-Hang / Instantâneo)
   // ----------------------------------------------------
@@ -267,7 +317,12 @@ export const AuthService = {
       localUsers.push(newUser);
       saveLocalUsers(localUsers);
 
-      // Replicate to Firestore in background without blocking execution
+      // Replicate to Cloud directory & Firestore in background without blocking execution
+      CloudShareService.syncPlatformUser({
+        id: userId,
+        username,
+        full_name: fullName,
+      }).catch(() => {});
       withTimeout(setDoc(doc(db, 'users', userId), newUser), 1500).catch(() => {});
 
       // 4. Generate and send 6-digit confirmation code immediately!

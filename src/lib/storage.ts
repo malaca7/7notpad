@@ -33,6 +33,70 @@ export function isNoteUnlockedInCurrentTab(noteId: string, passwordHash?: string
   return tabUnlockedHashes[noteId] === passwordHash;
 }
 
+/**
+ * Check if the current browser/user is the creator/admin of the note or an authorized @username member.
+ * Creator/admin and authorized @username members NEVER need to enter a password!
+ */
+export function hasDirectNoteAccess(
+  note?: Partial<Note> | null,
+  share?: NoteShare | null
+): { allowed: boolean; isCreator: boolean; matchedUser?: string } {
+  const currentOwnerToken = getOrCreateOwnerToken();
+  const currentUser = AuthService.getCurrentUser();
+
+  // 1. Check owner_token match (creator in same browser)
+  if (
+    (note?.owner_token && note.owner_token === currentOwnerToken) ||
+    (share?.owner_token && share.owner_token === currentOwnerToken)
+  ) {
+    return { allowed: true, isCreator: true };
+  }
+
+  // 2. Check if note exists in this browser's local notes as owned by this browser
+  const noteId = note?.id || share?.note_id;
+  if (noteId) {
+    try {
+      const raw = localStorage.getItem(LOCAL_STORAGE_NOTES_KEY);
+      if (raw) {
+        const localNotes: Note[] = JSON.parse(raw);
+        const found = localNotes.find((n) => n.id === noteId || n.share?.custom_slug === share?.custom_slug);
+        if (found && (!found.owner_token || found.owner_token === currentOwnerToken)) {
+          return { allowed: true, isCreator: true };
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Check logged-in user match (creator by user_id or owner_username, or authorized @username in allowed_users)
+  if (currentUser) {
+    const myUsername = currentUser.username.trim().toLowerCase().replace(/^@+/, '');
+
+    if (
+      (note?.user_id && note.user_id === currentUser.id) ||
+      (share?.owner_user_id && share.owner_user_id === currentUser.id) ||
+      (note?.owner_username && note.owner_username.toLowerCase() === myUsername) ||
+      (share?.owner_username && share.owner_username.toLowerCase() === myUsername)
+    ) {
+      return { allowed: true, isCreator: true, matchedUser: `@${myUsername}` };
+    }
+
+    if (Array.isArray(share?.allowed_users)) {
+      const match = share.allowed_users.find(
+        (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUsername
+      );
+      if (match) {
+        return {
+          allowed: true,
+          isCreator: match.role === 'admin',
+          matchedUser: `@${myUsername}`,
+        };
+      }
+    }
+  }
+
+  return { allowed: false, isCreator: false };
+}
+
 export function notifyRealtimeSubscribers(payload?: { type: string; noteId?: string; slug?: string }): void {
   try {
     broadcastChannel?.postMessage({ ...payload, timestamp: Date.now() });
@@ -231,8 +295,9 @@ export const StorageService = {
   // Save or update note (100% Local-First + Background Cloud Sync)
   async saveNote(note: Note): Promise<{ success: boolean }> {
     const currentUser = AuthService.getCurrentUser();
-    if (currentUser && !note.user_id) {
-      note.user_id = currentUser.id;
+    if (currentUser) {
+      if (!note.user_id) note.user_id = currentUser.id;
+      if (!note.owner_username) note.owner_username = currentUser.username;
     }
 
     const updatedNote: Note = {
@@ -428,6 +493,9 @@ export const StorageService = {
               content: localShare.is_password_protected ? '' : matchingLocalNote.content,
               created_at: matchingLocalNote.created_at,
               updated_at: matchingLocalNote.updated_at,
+              owner_token: matchingLocalNote.owner_token,
+              user_id: matchingLocalNote.user_id,
+              owner_username: matchingLocalNote.owner_username,
               attachments: matchingLocalNote.attachments,
             },
           };
@@ -458,6 +526,9 @@ export const StorageService = {
               content: localShare.is_password_protected ? '' : matchingLocalNote.content,
               created_at: matchingLocalNote.created_at,
               updated_at: matchingLocalNote.updated_at,
+              owner_token: matchingLocalNote.owner_token,
+              user_id: matchingLocalNote.user_id,
+              owner_username: matchingLocalNote.owner_username,
               attachments: matchingLocalNote.attachments,
             },
           };

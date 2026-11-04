@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { StorageService, subscribeToRealtimeSync } from '../../lib/storage';
+import { StorageService, subscribeToRealtimeSync, hasDirectNoteAccess } from '../../lib/storage';
+import { subscribeToAuth } from '../../lib/authService';
 import { verifyPassword } from '../../lib/crypto';
 import type { NoteShare, Attachment } from '../../types/note';
 import { useToast } from '../common/Toast';
@@ -18,7 +19,8 @@ import {
   Sun,
   Moon,
   Info,
-  Radio
+  Radio,
+  ShieldCheck
 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 
@@ -49,6 +51,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   const [lockoutTime, setLockoutTime] = useState(0);
   const [isVerifying, setIsVerifying] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [directAccessBadge, setDirectAccessBadge] = useState<string | null>(null);
 
   // Track which password_hash the visitor unlocked so password changes immediately re-lock all views
   const unlockedPasswordHashRef = useRef<string | null>(null);
@@ -81,6 +84,27 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       setCreatedAt(result.note?.created_at || '');
       setUpdatedAt(result.note?.updated_at || '');
       setAttachments((result.note as any)?.attachments || []);
+
+      // Creator/Admin of the note OR authorized @username member NEVER needs to enter a password!
+      const directAccess = hasDirectNoteAccess(result.note, result.share);
+      if (directAccess.allowed) {
+        setDirectAccessBadge(
+          directAccess.isCreator
+            ? `Criador / Admin${directAccess.matchedUser ? ` (${directAccess.matchedUser})` : ''}`
+            : `Acesso Liberado (${directAccess.matchedUser || 'Membro'})`
+        );
+        setIsLocked(false);
+        setPasswordError('');
+        const fullContent =
+          result.rawContent ??
+          result.note?.content ??
+          (await StorageService.unlockProtectedNoteContent(slug)) ??
+          '';
+        setContent(fullContent);
+        return;
+      } else {
+        setDirectAccessBadge(null);
+      }
 
       if (result.share.is_password_protected) {
         const currentHash = result.share.password_hash || '';
@@ -130,8 +154,11 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   useEffect(() => {
     syncPublicNoteState(true);
 
-    // 1. Instant 0ms sync across tabs in the same browser
+    // 1. Instant 0ms sync across tabs in the same browser & auth session changes
     const unsubRealtime = subscribeToRealtimeSync(() => {
+      syncPublicNoteState(false);
+    });
+    const unsubAuth = subscribeToAuth(() => {
       syncPublicNoteState(false);
     });
 
@@ -152,6 +179,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
 
     return () => {
       unsubRealtime();
+      unsubAuth();
       clearInterval(pollInterval);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);
@@ -312,6 +340,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
               <Radio className="w-3 h-3 animate-pulse" />
               <span>Sincronizado ao vivo</span>
             </span>
+            {directAccessBadge && (
+              <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 font-medium border border-purple-500/20">
+                <ShieldCheck className="w-3 h-3" />
+                <span>{directAccessBadge}</span>
+              </span>
+            )}
           </div>
         </div>
 

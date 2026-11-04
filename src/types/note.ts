@@ -9,6 +9,13 @@ export interface Attachment {
   created_at: string;
 }
 
+export interface SharedUserAccess {
+  username: string; // lowercase without @
+  full_name?: string;
+  role: 'viewer' | 'admin';
+  added_at: string;
+}
+
 export interface NoteShare {
   id: string;
   note_id: string;
@@ -20,6 +27,10 @@ export interface NoteShare {
   created_at: string;
   updated_at: string;
   view_count?: number;
+  owner_token?: string;
+  owner_user_id?: string;
+  owner_username?: string;
+  allowed_users?: SharedUserAccess[];
 }
 
 export interface Note {
@@ -31,6 +42,7 @@ export interface Note {
   updated_at: string;
   owner_token: string;
   user_id?: string;
+  owner_username?: string;
   is_pinned?: boolean;
   color?: string;
   attachments?: Attachment[];
