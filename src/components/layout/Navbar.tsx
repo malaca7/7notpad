@@ -22,7 +22,8 @@ interface NavbarProps {
   onOpenSettings: (tab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup') => void;
   onOpenAuthModal: () => void;
   totalNotes: number;
-  onReturnHome?: () => void;
+  onGoToDashboard?: () => void;
+  isDashboard?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -30,7 +31,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenSettings,
   onOpenAuthModal,
   totalNotes,
-  onReturnHome,
+  onGoToDashboard,
+  isDashboard = false,
 }) => {
   const { theme, toggleTheme } = useTheme();
   const { user, isAuthenticated, logout } = useAuth();
@@ -62,25 +64,29 @@ export const Navbar: React.FC<NavbarProps> = ({
         </button>
 
         <div 
-          onClick={onReturnHome}
-          className={`flex items-center gap-2 md:hidden ${onReturnHome ? 'cursor-pointer active:opacity-75' : ''}`}
-          title={onReturnHome ? 'Ir para Tela de Início' : undefined}
+          onClick={onGoToDashboard}
+          className={`flex items-center gap-2 ${onGoToDashboard ? 'cursor-pointer active:opacity-75' : ''}`}
+          title="Ir para o Painel de Início"
         >
-          <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white font-black text-xs">
+          <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white font-black text-xs shadow-sm shadow-brand-500/20">
             7
           </div>
           <span className="font-bold text-sm text-gray-100">7NotPad</span>
         </div>
 
-        {onReturnHome && (
+        {onGoToDashboard && (
           <button
             type="button"
-            onClick={onReturnHome}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#1c1c1c] bg-[#080808] hover:bg-[#141414] text-xs font-medium text-gray-300 hover:text-white transition-colors"
-            title="Voltar para a Tela de Início"
+            onClick={onGoToDashboard}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl border text-xs font-medium transition-colors ${
+              isDashboard 
+                ? 'border-brand-500/40 bg-brand-500/15 text-brand-300' 
+                : 'border-[#1c1c1c] bg-[#080808] hover:bg-[#141414] text-gray-300 hover:text-white'
+            }`}
+            title="Ir para o Painel de Início (/notpad)"
           >
             <Home className="w-3.5 h-3.5 text-brand-400" />
-            <span>Tela de Início</span>
+            <span className="hidden sm:inline">Início</span>
           </button>
         )}
       </div>
@@ -163,6 +169,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </div>
 
                 <div className="py-1">
+                  {onGoToDashboard && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        onGoToDashboard();
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#121212] rounded-xl transition-colors text-left"
+                    >
+                      <Home className="w-3.5 h-3.5 text-brand-400" />
+                      <span>Painel de Início</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => {

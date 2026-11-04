@@ -10,7 +10,8 @@ import {
   Calendar,
   FileText,
   X,
-  Sparkles
+  Sparkles,
+  Home
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
@@ -22,6 +23,8 @@ interface SidebarProps {
   onDeleteNote: (id: string) => void;
   onCloseMobile?: () => void;
   isMobileOpen?: boolean;
+  onGoToDashboard?: () => void;
+  isDashboard?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -32,6 +35,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteNote,
   onCloseMobile,
   isMobileOpen = false,
+  onGoToDashboard,
+  isDashboard = false,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'pinned' | 'shared'>('all');
@@ -101,7 +106,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       >
         {/* Sidebar Header / Brand */}
         <div className="p-4 border-b border-[#1c1c1c] flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
+          <div 
+            onClick={() => {
+              if (onGoToDashboard) onGoToDashboard();
+              if (onCloseMobile) onCloseMobile();
+            }}
+            className={`flex items-center gap-2.5 ${onGoToDashboard ? 'cursor-pointer select-none active:opacity-75' : ''}`}
+            title="Ir para o Painel de Início"
+          >
             <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white font-black text-sm shadow-md shadow-brand-500/20">
               7
             </div>
@@ -125,6 +137,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           )}
         </div>
+
+        {/* Dashboard / Home Navigation */}
+        {onGoToDashboard && (
+          <div className="px-3 pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                onGoToDashboard();
+                if (onCloseMobile) onCloseMobile();
+              }}
+              className={`w-full flex items-center gap-2.5 py-2 px-3 rounded-xl border text-xs font-semibold transition-all ${
+                isDashboard
+                  ? 'border-brand-500/40 bg-brand-500/15 text-brand-300 shadow-sm shadow-brand-500/10'
+                  : 'border-[#1c1c1c] bg-[#080808] hover:bg-[#121212] text-gray-300 hover:text-white'
+              }`}
+            >
+              <Home className="w-4 h-4 text-brand-400" />
+              <span>Painel de Início</span>
+              {isDashboard && (
+                <span className="ml-auto w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* New Note Button */}
         <div className="p-3">

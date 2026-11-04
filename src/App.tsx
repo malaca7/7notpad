@@ -3,7 +3,7 @@ import { ToastProvider } from './components/common/Toast';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { NoteEditor } from './components/editor/NoteEditor';
-import { EmptyState } from './components/layout/EmptyState';
+import { UserDashboard } from './components/dashboard/UserDashboard';
 import { ShareModal } from './components/share/ShareModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { PublicNoteView } from './components/share/PublicNoteView';
@@ -14,10 +14,10 @@ import { LandingHome } from './components/home/LandingHome';
 import { useNotes } from './hooks/useNotes';
 import { useAuth } from './hooks/useAuth';
 import { getLocalNotes } from './lib/storage';
-import { FileText, Plus, Share2, Copy, Check, Settings } from 'lucide-react';
+import { FileText, Plus, Share2, Copy, Check, Settings, Home } from 'lucide-react';
 
 export function MainLayout() {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const {
     notes,
     activeNote,
@@ -148,12 +148,12 @@ export function MainLayout() {
 
         const currentPath = window.location.pathname;
         if (currentPath === cleanBase || currentPath === `${cleanBase}/` || currentPath === '/') {
-          const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : `${cleanBase}/notpad`;
+          const targetPath = `${cleanBase}/notpad`;
           window.history.replaceState({}, '', targetPath);
         }
       } catch {}
     }
-  }, [isAuthenticated, activeNoteId]);
+  }, [isAuthenticated]);
 
   // Sync initial URL note ID into activeNoteId if owner opened /notpad/<note.id>
   useEffect(() => {
@@ -164,18 +164,18 @@ export function MainLayout() {
     }
   }, [setActiveNoteId, isAuthenticated]);
 
-  // Keep browser address bar at /notpad/<ID_UNICO_DO_BLOCO_DE_NOTA> when editing a note
+  // Keep browser address bar in sync: /notpad/:id when editing, or /notpad when on dashboard
   useEffect(() => {
-    if (!isAuthenticated || publicSlug || !activeNoteId) return;
+    if (!isAuthenticated || publicSlug) return;
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('reset_token')) return;
 
       const baseUrl = (import.meta as any).env?.BASE_URL || '/';
       const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
-      const targetPath = `${cleanBase}/notpad/${activeNoteId}`;
+      const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : `${cleanBase}/notpad`;
 
-      if (window.location.pathname !== targetPath || window.location.hash.includes('data=')) {
+      if (window.location.pathname !== targetPath && !window.location.hash.includes('data=')) {
         window.history.replaceState({}, '', targetPath);
       }
     } catch {}
@@ -202,9 +202,7 @@ export function MainLayout() {
     const handleLocationChange = () => {
       const route = resolveRoute();
       setPublicSlug(route.publicSlug);
-      if (route.editorNoteId) {
-        setActiveNoteId(route.editorNoteId);
-      }
+      setActiveNoteId(route.editorNoteId);
     };
 
     window.addEventListener('popstate', handleLocationChange);
@@ -215,12 +213,16 @@ export function MainLayout() {
     };
   }, [setActiveNoteId, isAuthenticated]);
 
-  const handleGoHome = () => {
+  const handleGoToDashboard = () => {
+    setActiveNoteId(null);
+    setPublicSlug(null);
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
     const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
-    const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : `${cleanBase}/notpad`;
-    window.history.pushState({}, '', targetPath);
-    setPublicSlug(null);
+    window.history.pushState({}, '', `${cleanBase}/notpad`);
+  };
+
+  const handleGoHome = () => {
+    handleGoToDashboard();
   };
 
   // ========================================================
@@ -313,6 +315,8 @@ export function MainLayout() {
           setIsAuthModalOpen(true);
         }}
         totalNotes={notes.length}
+        onGoToDashboard={handleGoToDashboard}
+        isDashboard={!activeNoteId}
       />
 
       {/* Main Workspace Body */}
@@ -340,9 +344,11 @@ export function MainLayout() {
           onDeleteNote={deleteNote}
           isMobileOpen={isMobileSidebarOpen}
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
+          onGoToDashboard={handleGoToDashboard}
+          isDashboard={!activeNoteId}
         />
 
-        {/* Editor or Empty State */}
+        {/* Editor or Dashboard */}
         <main className="flex-1 flex flex-col h-full overflow-hidden bg-black">
           {activeNote ? (
             <NoteEditor
@@ -354,13 +360,32 @@ export function MainLayout() {
               onTogglePin={togglePin}
             />
           ) : (
-            <EmptyState onCreateNote={(tpl) => createNote(tpl)} />
+            <UserDashboard
+              user={user}
+              notes={notes}
+              onCreateNote={(tpl) => createNote(tpl)}
+              onSelectNote={(id) => setActiveNoteId(id)}
+              onDeleteNote={deleteNote}
+              onTogglePin={togglePin}
+            />
           )}
         </main>
       </div>
 
       {/* Dedicated Mobile Bottom Navigation Bar */}
       <nav className="md:hidden h-14 border-t border-[#1c1c1c] bg-[#050505]/95 backdrop-blur-md px-2 flex items-center justify-around shrink-0 z-20 select-none">
+        <button
+          type="button"
+          onClick={handleGoToDashboard}
+          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium transition-colors ${
+            !activeNoteId ? 'text-brand-400 font-semibold' : 'text-gray-400 active:text-white'
+          }`}
+          title="Painel de Início"
+        >
+          <Home className="w-4 h-4" />
+          <span>Início</span>
+        </button>
+
         <button
           type="button"
           onClick={() => setIsMobileSidebarOpen(prev => !prev)}

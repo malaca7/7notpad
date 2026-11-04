@@ -10,20 +10,29 @@ const ACTIVE_NOTE_STORAGE_KEY = '7notpad_active_note_id';
 
 function getInitialActiveNoteId(initialNotes: Note[]): string | null {
   try {
-    const savedId = localStorage.getItem(ACTIVE_NOTE_STORAGE_KEY);
-    if (savedId && initialNotes.some((n) => n.id === savedId)) {
-      return savedId;
+    const path = window.location.pathname;
+    const hash = window.location.hash;
+
+    // Only set active note if URL specifically points to /notpad/:id or #/notpad/:id
+    if (path.includes('/notpad/')) {
+      const parts = path.split('/notpad/');
+      const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
+      if (slug && slug !== 'notpad') {
+        const found = initialNotes.find((n) => n.id === slug);
+        if (found) return found.id;
+      }
+    }
+    if (hash.includes('#/notpad/')) {
+      const parts = hash.split('#/notpad/');
+      const slug = parts[parts.length - 1]?.split('#')[0]?.replace(/\/+$/, '').trim();
+      if (slug && slug !== 'notpad') {
+        const found = initialNotes.find((n) => n.id === slug);
+        if (found) return found.id;
+      }
     }
   } catch {}
 
-  if (initialNotes.length > 0) {
-    const sorted = [...initialNotes].sort((a, b) => {
-      if (a.is_pinned && !b.is_pinned) return -1;
-      if (!a.is_pinned && b.is_pinned) return 1;
-      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-    });
-    return sorted[0].id;
-  }
+  // If user navigated to /notpad without note ID, return null to show Logged-in Dashboard!
   return null;
 }
 
