@@ -219,8 +219,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       return { success: false, error: 'Este link já está em uso por outra nota. Escolha outro.' };
     }
 
-    if (isPasswordProtected && !note.share?.password_hash && !password.trim()) {
-      return { success: false, error: 'Você ativou a proteção por senha, informe uma senha válida.' };
+    if (isPasswordProtected) {
+      if (!note.share?.password_hash && !password.trim()) {
+        return { success: false, error: 'Você ativou a proteção por senha, informe uma senha de no mínimo 3 dígitos.' };
+      }
+      if (password.trim() && password.trim().length < 3) {
+        return { success: false, error: 'A senha do bloco de nota deve ter no mínimo 3 dígitos.' };
+      }
     }
 
     let salt = note.share?.password_salt;
@@ -276,7 +281,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setIsSaving(true);
     try {
       // 1. Automatically activate and save the share!
-      await executeSave(true);
+      const res = await executeSave(true);
+      if (!res.success) {
+        error('Falha ao compartilhar', res.error || 'Erro ao validar compartilhamento.');
+        return;
+      }
 
       const urlToCopy = getShareUrl();
       await navigator.clipboard.writeText(urlToCopy);
@@ -301,7 +310,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const handleOpenPublicView = async () => {
     setIsSaving(true);
     try {
-      await executeSave(true);
+      const res = await executeSave(true);
+      if (!res.success) {
+        error('Falha ao compartilhar', res.error || 'Erro ao validar compartilhamento.');
+        return;
+      }
       window.open(`${getShareUrl()}?view=public`, '_blank', 'noopener,noreferrer');
     } finally {
       setIsSaving(false);
@@ -589,14 +602,16 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           {isPasswordProtected && (
             <div className="pt-2">
               <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                {note.share?.password_hash ? 'Nova senha (deixe vazio para manter a atual):' : 'Digite uma senha para leitura:'}
+                {note.share?.password_hash
+                  ? 'Nova senha (mínimo 3 dígitos — deixe vazio para manter a atual):'
+                  : 'Digite uma senha para leitura (mínimo 3 dígitos):'}
               </label>
               <div className="relative">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Defina uma senha segura..."
+                  placeholder="Mínimo 3 dígitos..."
                   className="w-full bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50 pr-10"
                 />
                 <button

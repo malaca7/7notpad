@@ -199,8 +199,8 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
     e.preventDefault();
     if (lockoutTime > 0) return;
 
-    if (!passwordInput) {
-      setPasswordError('Por favor, informe a senha.');
+    if (!passwordInput || passwordInput.trim().length < 3) {
+      setPasswordError('A senha do bloco de nota deve ter no mínimo 3 dígitos.');
       return;
     }
 
@@ -405,7 +405,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
                       setPasswordInput(e.target.value);
                       setPasswordError('');
                     }}
-                    placeholder="Digite a senha da nota..."
+                    placeholder="Digite a senha da nota (mín. 3 dígitos)..."
                     className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50 disabled:opacity-50"
                   />
                   <KeyRound className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />

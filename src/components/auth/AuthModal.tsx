@@ -143,6 +143,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
+    if (password.length < 6) {
+      setErrorMsg('A senha deve ter no mínimo 6 dígitos.');
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await AuthService.login({ username, password });
@@ -190,8 +195,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (password.length < 8) {
-      setErrorMsg('A senha deve ter no mínimo 8 caracteres.');
+    if (password.length < 6) {
+      setErrorMsg('A senha deve ter no mínimo 6 dígitos.');
       return;
     }
 
@@ -339,8 +344,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setErrorMsg('Por favor, digite o código de 6 dígitos.');
       return;
     }
-    if (password.length < 8) {
-      setErrorMsg('A nova senha deve ter no mínimo 8 caracteres.');
+    if (password.length < 6) {
+      setErrorMsg('A nova senha deve ter no mínimo 6 dígitos.');
       return;
     }
     if (password !== confirmPassword) {
@@ -379,8 +384,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (password.length < 8) {
-      setErrorMsg('A nova senha deve ter no mínimo 8 caracteres.');
+    if (password.length < 6) {
+      setErrorMsg('A nova senha deve ter no mínimo 6 dígitos.');
       return;
     }
     if (password !== confirmPassword) {
@@ -491,7 +496,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-300">Senha</label>
+                <label className="text-xs font-semibold text-slate-300">Senha <span className="text-[11px] font-normal text-slate-500">(mín. 6 dígitos)</span></label>
                 <button
                   type="button"
                   onClick={() => {
@@ -606,7 +611,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-300 flex justify-between">
                 <span>Senha</span>
-                <span className="text-[11px] text-slate-500">Mínimo 8 caracteres</span>
+                <span className="text-[11px] text-slate-500">Mínimo 6 dígitos</span>
               </label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -930,7 +935,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">Nova Senha (mínimo 8 caracteres)</label>
+              <label className="text-xs font-semibold text-slate-300">Nova Senha (mínimo 6 dígitos)</label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -999,7 +1004,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-300">Nova Senha (mínimo 8 caracteres)</label>
+              <label className="text-xs font-semibold text-slate-300">Nova Senha (mínimo 6 dígitos)</label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input

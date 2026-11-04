@@ -252,8 +252,8 @@ export const AuthService = {
       return { success: false, error: 'Por favor, insira um endereço de e-mail válido.' };
     }
 
-    if (password.length < 8) {
-      return { success: false, error: 'A senha deve conter no mínimo 8 caracteres.' };
+    if (password.length < 6) {
+      return { success: false, error: 'A senha deve conter no mínimo 6 dígitos.' };
     }
 
     if (password !== confirmPassword) {
@@ -613,6 +613,10 @@ export const AuthService = {
       return { success: false, error: 'Por favor, preencha o nome de usuário e a senha.' };
     }
 
+    if (password.length < 6) {
+      return { success: false, error: 'A senha deve conter no mínimo 6 dígitos.' };
+    }
+
     const username = rawUsername.toLowerCase();
 
     try {
@@ -784,8 +788,8 @@ export const AuthService = {
   }): Promise<{ success: boolean; error?: string }> {
     const { email, code, newPassword, confirmPassword } = params;
 
-    if (newPassword.length < 8) {
-      return { success: false, error: 'A nova senha deve ter pelo menos 8 caracteres.' };
+    if (newPassword.length < 6) {
+      return { success: false, error: 'A nova senha deve ter no mínimo 6 dígitos.' };
     }
     if (newPassword !== confirmPassword) {
       return { success: false, error: 'A confirmação de senha não coincide com a nova senha.' };
@@ -840,8 +844,8 @@ export const AuthService = {
     if (!token) {
       return { success: false, error: 'Token de redefinição inválido ou ausente.' };
     }
-    if (newPassword.length < 8) {
-      return { success: false, error: 'A nova senha deve ter pelo menos 8 caracteres.' };
+    if (newPassword.length < 6) {
+      return { success: false, error: 'A nova senha deve ter no mínimo 6 dígitos.' };
     }
     if (newPassword !== confirmPassword) {
       return { success: false, error: 'A confirmação de senha não coincide com a nova senha.' };
@@ -1029,8 +1033,8 @@ export const AuthService = {
     if (!currentPassword) {
       return { success: false, error: 'Informe a senha atual.' };
     }
-    if (newPassword.length < 8) {
-      return { success: false, error: 'A nova senha deve ter pelo menos 8 caracteres.' };
+    if (newPassword.length < 6) {
+      return { success: false, error: 'A nova senha deve ter no mínimo 6 dígitos.' };
     }
     if (newPassword !== confirmPassword) {
       return { success: false, error: 'A confirmação de senha não coincide com a nova senha.' };

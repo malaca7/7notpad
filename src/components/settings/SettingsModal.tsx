@@ -241,8 +241,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       error('Senha atual obrigatória', 'Informe sua senha atual para continuar.');
       return;
     }
-    if (newPassword.length < 8) {
-      error('Senha muito curta', 'A nova senha deve ter no mínimo 8 caracteres.');
+    if (newPassword.length < 6) {
+      error('Senha muito curta', 'A nova senha deve ter no mínimo 6 dígitos.');
       return;
     }
     if (newPassword !== confirmNewPassword) {
@@ -715,7 +715,7 @@ function processarEnvio(e) {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                        Nova Senha (min. 8 caracteres)
+                        Nova Senha (mín. 6 dígitos)
                       </label>
                       <div className="relative">
                         <input
