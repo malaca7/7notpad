@@ -73,17 +73,17 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onCreateNote }) => {
   ];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center bg-gray-50/50 dark:bg-dark-surface/50">
+    <div className="flex-1 flex flex-col items-center justify-center p-5 sm:p-12 text-center bg-black overflow-y-auto">
       <div className="max-w-lg w-full space-y-6">
         <div className="w-16 h-16 mx-auto rounded-3xl bg-gradient-to-tr from-brand-600/20 to-cyan-500/20 text-brand-400 border border-brand-500/30 flex items-center justify-center shadow-lg shadow-brand-500/10">
           <FileText className="w-8 h-8" />
         </div>
 
         <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-100">
             Nenhuma nota selecionada
           </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">
+          <p className="text-xs sm:text-sm text-gray-400 leading-relaxed">
             Selecione uma nota na barra lateral ou inicie uma nova nota com um clique ou através dos modelos rápidos abaixo.
           </p>
         </div>
@@ -96,12 +96,12 @@ export const EmptyState: React.FC<EmptyStateProps> = ({ onCreateNote }) => {
                 key={i}
                 type="button"
                 onClick={() => onCreateNote(tpl.data)}
-                className="p-4 rounded-2xl border border-gray-200 dark:border-[#232838] bg-white dark:bg-[#14161f] hover:border-brand-500/50 hover:bg-gray-50 dark:hover:bg-[#181b24] transition-all group shadow-sm"
+                className="p-4 rounded-2xl border border-[#1c1c1c] bg-[#080808] hover:border-brand-500/50 hover:bg-[#111111] transition-all group shadow-sm"
               >
                 <div className="w-8 h-8 rounded-xl bg-brand-500/10 text-brand-400 flex items-center justify-center mb-2.5 group-hover:scale-110 transition-transform">
                   <Icon className="w-4 h-4" />
                 </div>
-                <div className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                <div className="text-xs font-bold text-gray-100">
                   {tpl.title}
                 </div>
                 <div className="text-[11px] text-gray-400 mt-0.5">

@@ -12,6 +12,7 @@ import { AuthModal, type AuthModalView } from './components/auth/AuthModal';
 import { EmailNotificationToast } from './components/auth/EmailNotificationToast';
 import { useNotes } from './hooks/useNotes';
 import { getLocalNotes } from './lib/storage';
+import { FileText, Plus, Share2, Copy, Check, Settings } from 'lucide-react';
 
 export function MainLayout() {
   const {
@@ -32,6 +33,19 @@ export function MainLayout() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
+  const [mobileCopiedLink, setMobileCopiedLink] = useState(false);
+
+  const handleMobileCopyLink = async () => {
+    if (!activeNoteId) return;
+    try {
+      const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+      const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+      const url = `${window.location.origin}${cleanBase}/notpad/${activeNoteId}`;
+      await navigator.clipboard.writeText(url);
+      setMobileCopiedLink(true);
+      setTimeout(() => setMobileCopiedLink(false), 2000);
+    } catch {}
+  };
 
   // Auth Modal states
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -190,7 +204,7 @@ export function MainLayout() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 overflow-hidden font-sans">
+    <div className="flex flex-col h-[100dvh] w-screen bg-black text-gray-100 overflow-hidden font-sans">
       {/* Browser Data Persistence Notice */}
       <BrowserWarningBanner />
 
@@ -213,7 +227,7 @@ export function MainLayout() {
         {/* Mobile backdrop */}
         {isMobileSidebarOpen && (
           <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden animate-in fade-in"
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-30 md:hidden animate-in fade-in"
             onClick={() => setIsMobileSidebarOpen(false)}
           />
         )}
@@ -236,7 +250,7 @@ export function MainLayout() {
         />
 
         {/* Editor or Empty State */}
-        <main className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-dark-surface">
+        <main className="flex-1 flex flex-col h-full overflow-hidden bg-black">
           {activeNote ? (
             <NoteEditor
               key={activeNote.id}
@@ -251,6 +265,79 @@ export function MainLayout() {
           )}
         </main>
       </div>
+
+      {/* Dedicated Mobile Bottom Navigation Bar */}
+      <nav className="md:hidden h-14 border-t border-[#1c1c1c] bg-[#050505]/95 backdrop-blur-md px-2 flex items-center justify-around shrink-0 z-20 select-none">
+        <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen(prev => !prev)}
+          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium transition-colors relative ${
+            isMobileSidebarOpen ? 'text-brand-400' : 'text-gray-400 active:text-white'
+          }`}
+        >
+          <div className="relative">
+            <FileText className="w-4 h-4" />
+            <span className="absolute -top-1.5 -right-2.5 min-w-[14px] h-[14px] px-1 rounded-full bg-brand-600 text-white text-[9px] font-bold flex items-center justify-center">
+              {notes.length}
+            </span>
+          </div>
+          <span>Notas</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            createNote();
+            setIsMobileSidebarOpen(false);
+          }}
+          className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-semibold text-brand-400 active:scale-95 transition-all"
+        >
+          <div className="w-6 h-6 rounded-lg bg-brand-600 text-white flex items-center justify-center shadow-sm shadow-brand-600/30">
+            <Plus className="w-4 h-4" />
+          </div>
+          <span>Nova Nota</span>
+        </button>
+
+        {activeNote && (
+          <button
+            type="button"
+            onClick={() => setIsShareModalOpen(true)}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium transition-colors ${
+              activeNote.share?.is_active ? 'text-emerald-400' : 'text-gray-400 active:text-white'
+            }`}
+          >
+            <Share2 className="w-4 h-4" />
+            <span>Compartilhar</span>
+          </button>
+        )}
+
+        {activeNote && (
+          <button
+            type="button"
+            onClick={handleMobileCopyLink}
+            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium text-gray-400 active:text-white transition-colors"
+          >
+            {mobileCopiedLink ? (
+              <Check className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <Copy className="w-4 h-4" />
+            )}
+            <span>{mobileCopiedLink ? 'Copiado!' : 'Copiar Link'}</span>
+          </button>
+        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            setSettingsInitialTab('account');
+            setIsSettingsModalOpen(true);
+          }}
+          className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium text-gray-400 active:text-white transition-colors"
+        >
+          <Settings className="w-4 h-4" />
+          <span>Ajustes</span>
+        </button>
+      </nav>
 
       {/* Share Modal */}
       {activeNote && (

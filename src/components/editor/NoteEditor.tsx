@@ -163,12 +163,12 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const isShared = Boolean(note.share && note.share.is_active);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-white dark:bg-dark-surface overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-black overflow-hidden">
       {/* Editor Header Bar */}
-      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-[#232838] bg-white dark:bg-[#11131a] gap-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 sm:py-3 border-b border-[#1c1c1c] bg-[#050505] gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           {/* Save Status Indicator */}
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 text-xs shrink-0">
             {saveStatus === 'saving' && (
               <span className="flex items-center gap-1.5 text-brand-400 font-medium animate-pulse">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -191,22 +191,23 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             {saveStatus === 'unsaved' && (
               <span className="flex items-center gap-1.5 text-amber-500 font-medium">
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
-                <span>Alterações pendentes</span>
+                <span>Pendente</span>
               </span>
             )}
           </div>
         </div>
 
         {/* Header Right Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2">
           {/* Quick Copy Unique Note URL Pill */}
           <button
             type="button"
             onClick={handleCopyNoteUrl}
             title={`Copiar URL única: ${getNoteUrl()}`}
-            className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#141720] hover:bg-gray-100 dark:hover:bg-[#1c202c] text-[11px] font-mono text-gray-500 dark:text-gray-400 transition-colors"
+            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border border-[#1c1c1c] bg-[#0a0a0a] hover:bg-[#141414] text-[11px] font-mono text-gray-400 transition-colors"
           >
-            <span className="truncate max-w-[200px]">/notpad/{note.id}</span>
+            <span className="hidden md:inline truncate max-w-[200px]">/notpad/{note.id}</span>
+            <span className="md:hidden">Link</span>
             {copiedUrl ? (
               <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             ) : (
@@ -223,7 +224,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
               className={`p-2 rounded-xl border text-xs transition-colors ${
                 note.is_pinned
                   ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                  : 'border-gray-200 dark:border-[#232838] text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                  : 'border-[#1c1c1c] bg-[#0a0a0a] text-gray-400 hover:text-white'
               }`}
             >
               <Pin className={`w-4 h-4 ${note.is_pinned ? 'rotate-45 fill-amber-400' : ''}`} />
@@ -234,10 +235,10 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           <button
             type="button"
             onClick={onOpenShareModal}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
+            className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
               isShared
                 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-brand-600/30 ring-2 ring-brand-400/50'
-                : 'border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#181b24] hover:bg-gray-100 dark:hover:bg-[#202430] text-gray-700 dark:text-gray-200'
+                : 'border border-[#1c1c1c] bg-[#0d0d0d] hover:bg-[#171717] text-gray-200'
             }`}
           >
             <Share2 className="w-3.5 h-3.5" />
@@ -257,19 +258,19 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       />
 
       {/* Editor Content Area */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6">
-        <div className={`mx-auto ${maxWidthClass} space-y-6`}>
+      <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-6">
+        <div className={`mx-auto ${maxWidthClass} space-y-5 sm:space-y-6`}>
           {/* Note Title Input */}
           <input
             type="text"
             value={title}
             onChange={handleTitleChange}
             placeholder="Título da nota..."
-            className="w-full bg-transparent text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none border-b border-transparent focus:border-brand-500/30 pb-2 transition-colors"
+            className="w-full bg-transparent text-xl sm:text-3xl font-bold tracking-tight text-gray-100 placeholder:text-gray-600 outline-none border-b border-transparent focus:border-brand-500/30 pb-2 transition-colors"
           />
 
           {/* TipTap Document Body */}
-          <div className={`${fontClass} ${fontSizeClass} ${lineSpacingClass} text-gray-800 dark:text-gray-200 min-h-[300px]`}>
+          <div className={`${fontClass} ${fontSizeClass} ${lineSpacingClass} text-gray-200 min-h-[260px] sm:min-h-[300px]`}>
             <EditorContent editor={editor} />
           </div>
 
@@ -283,7 +284,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       </div>
 
       {/* Editor Status Bar / Footer */}
-      <div className="px-4 sm:px-6 py-2 border-t border-gray-200 dark:border-[#232838] bg-gray-50/70 dark:bg-[#11131a]/70 text-[11px] text-gray-500 dark:text-gray-400 flex items-center justify-between">
+      <div className="px-4 sm:px-6 py-2 border-t border-[#1c1c1c] bg-[#050505] text-[11px] text-gray-400 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span>{stats.words} palavras</span>
           <span>•</span>

@@ -46,13 +46,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   }, []);
 
   return (
-    <header className="h-14 border-b border-gray-200 dark:border-[#232838] bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md px-4 flex items-center justify-between shrink-0 z-20">
+    <header className="h-14 border-b border-[#1c1c1c] bg-black/95 backdrop-blur-md px-3 sm:px-4 flex items-center justify-between shrink-0 z-20">
       {/* Mobile Toggle & Brand */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5 sm:gap-3">
         <button
           type="button"
           onClick={onToggleMobileSidebar}
-          className="p-2 rounded-xl border border-gray-200 dark:border-[#232838] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] md:hidden transition-colors"
+          className="p-2 rounded-xl border border-[#1c1c1c] bg-[#080808] text-gray-300 hover:bg-[#121212] md:hidden transition-colors"
           title="Abrir lista de notas"
         >
           <Menu className="w-4 h-4" />
@@ -62,12 +62,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="w-6 h-6 rounded-lg bg-gradient-to-tr from-brand-600 to-cyan-500 flex items-center justify-center text-white font-black text-xs">
             7
           </div>
-          <span className="font-bold text-sm text-gray-900 dark:text-gray-100">7NotPad</span>
+          <span className="font-bold text-sm text-gray-100">7NotPad</span>
         </div>
       </div>
 
       {/* Sync Status Badge & Action Controls */}
-      <div className="flex items-center gap-2 sm:gap-2.5">
+      <div className="flex items-center gap-1.5 sm:gap-2.5">
         {/* Firebase Cloud Sync Status */}
         <button
           type="button"
@@ -83,24 +83,24 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           type="button"
           onClick={exportNotesToJson}
-          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#14161f] text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#1c1c1c] bg-[#080808] text-xs font-medium text-gray-300 hover:bg-[#121212] transition-colors"
           title="Exportar backup JSON das notas"
         >
           <Download className="w-3.5 h-3.5 text-gray-400" />
           <span>Backup</span>
         </button>
 
-        {/* Theme Toggle (Dark Mode default) */}
+        {/* Theme indicator (Pure Black OLED) */}
         <button
           type="button"
           onClick={toggleTheme}
-          className="p-2 rounded-xl border border-gray-200 dark:border-[#232838] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
-          title={theme === 'dark' ? 'Mudar para Modo Claro' : 'Mudar para Modo Escuro'}
+          className="hidden sm:flex p-2 rounded-xl border border-[#1c1c1c] bg-[#080808] text-gray-300 hover:bg-[#121212] transition-colors"
+          title="Tema Preto Ativo"
         >
           {theme === 'dark' ? (
-            <Sun className="w-4 h-4 text-amber-400" />
+            <Moon className="w-4 h-4 text-brand-400" />
           ) : (
-            <Moon className="w-4 h-4 text-brand-600" />
+            <Sun className="w-4 h-4 text-amber-400" />
           )}
         </button>
 
@@ -108,7 +108,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           type="button"
           onClick={() => onOpenSettings('editor')}
-          className="p-2 rounded-xl border border-gray-200 dark:border-[#232838] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
+          className="p-2 rounded-xl border border-[#1c1c1c] bg-[#080808] text-gray-300 hover:bg-[#121212] transition-colors"
           title="Configurações do Editor e Sistema"
         >
           <SettingsIcon className="w-4 h-4" />
@@ -123,22 +123,22 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-xl border border-brand-500/30 bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 text-xs font-semibold transition-all shadow-sm shadow-brand-500/10"
               title={`Conta: @${user.username}`}
             >
-              <div className="w-5 h-5 rounded-lg bg-brand-500 text-white flex items-center justify-center text-[11px] font-bold">
+              <div className="w-5 h-5 rounded-lg bg-brand-500 text-white flex items-center justify-center text-[11px] font-bold shrink-0">
                 {user.full_name ? user.full_name[0].toUpperCase() : 'U'}
               </div>
-              <span className="hidden xs:inline max-w-[100px] truncate font-mono">
+              <span className="max-w-[90px] sm:max-w-[120px] truncate font-mono">
                 @{user.username}
               </span>
-              <ChevronDown className="w-3 h-3 opacity-70" />
+              <ChevronDown className="w-3 h-3 opacity-70 shrink-0" />
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl bg-white dark:bg-[#12141c] border border-gray-200 dark:border-[#232838] shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-2 border-b border-gray-100 dark:border-[#232838]">
-                  <p className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate">
+              <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl bg-[#050505] border border-[#1c1c1c] shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                <div className="px-3 py-2 border-b border-[#1c1c1c]">
+                  <p className="text-xs font-bold text-gray-100 truncate">
                     {user.full_name}
                   </p>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 font-mono truncate">
+                  <p className="text-[11px] text-gray-400 font-mono truncate">
                     @{user.username}
                   </p>
                 </div>
@@ -150,7 +150,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setDropdownOpen(false);
                       onOpenSettings('account');
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1a1d28] rounded-xl transition-colors text-left"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#121212] rounded-xl transition-colors text-left"
                   >
                     <User className="w-3.5 h-3.5 text-brand-400" />
                     <span>Minha Conta</span>
@@ -161,7 +161,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setDropdownOpen(false);
                       onOpenSettings('email');
                     }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1a1d28] rounded-xl transition-colors text-left"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#121212] rounded-xl transition-colors text-left"
                   >
                     <Mail className="w-3.5 h-3.5 text-blue-400" />
                     <span>Serviço de E-mail</span>

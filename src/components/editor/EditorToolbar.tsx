@@ -59,23 +59,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   };
 
   const btnClass = (isActive: boolean) =>
-    `p-1.5 sm:p-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center ${
+    `p-2 rounded-lg text-xs font-medium transition-colors flex items-center justify-center shrink-0 ${
       isActive
         ? 'bg-brand-500/20 text-brand-400 font-bold border border-brand-500/30'
-        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-[#181b24]'
+        : 'text-gray-400 hover:text-gray-100 hover:bg-[#121212] active:bg-[#1a1a1a]'
     }`;
 
-  const divider = <div className="w-[1px] h-5 bg-gray-200 dark:bg-[#232838] mx-1 shrink-0" />;
+  const divider = <div className="w-[1px] h-5 bg-[#1c1c1c] mx-1 shrink-0" />;
 
   return (
-    <div className="flex flex-wrap items-center gap-1 p-1.5 sm:p-2 bg-white dark:bg-[#11131a] border-b border-gray-200 dark:border-[#232838] sticky top-0 z-20 overflow-x-auto">
+    <div className="flex flex-nowrap sm:flex-wrap items-center gap-1 px-2 py-1.5 sm:p-2 bg-[#050505] border-b border-[#1c1c1c] sticky top-0 z-20 overflow-x-auto no-scrollbar">
       {/* Undo / Redo */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           type="button"
           onClick={() => editor.chain().focus().undo().run()}
           disabled={!editor.can().undo()}
-          className="p-1.5 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-white disabled:opacity-30 disabled:pointer-events-none"
+          className="p-2 rounded-lg text-gray-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none shrink-0"
           title="Desfazer (Ctrl+Z)"
         >
           <Undo2 className="w-4 h-4" />
@@ -84,7 +84,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           type="button"
           onClick={() => editor.chain().focus().redo().run()}
           disabled={!editor.can().redo()}
-          className="p-1.5 rounded-lg text-gray-500 hover:text-gray-900 dark:hover:text-white disabled:opacity-30 disabled:pointer-events-none"
+          className="p-2 rounded-lg text-gray-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none shrink-0"
           title="Refazer (Ctrl+Y)"
         >
           <Redo2 className="w-4 h-4" />
@@ -94,7 +94,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {divider}
 
       {/* Headings */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
@@ -124,7 +124,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {divider}
 
       {/* Basic Marks: Bold, Italic, Underline, Strike */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -162,7 +162,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {divider}
 
       {/* Lists */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBulletList().run()}
@@ -192,7 +192,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {divider}
 
       {/* Blocks: Quote, Code, HR */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBlockquote().run()}
@@ -222,7 +222,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       {divider}
 
       {/* Media & Tools */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 shrink-0">
         <button
           type="button"
           onClick={onOpenImageModal}

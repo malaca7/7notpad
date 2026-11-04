@@ -41,24 +41,27 @@ export const Modal: React.FC<ModalProps> = ({
   }[maxWidth];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+        className="fixed inset-0 bg-black/80 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       />
 
       {/* Modal Dialog */}
       <div
-        className={`relative w-full ${maxWidthClasses} bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200`}
+        className={`relative w-full ${maxWidthClasses} bg-[#050505] border border-[#1c1c1c] rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden z-10 animate-in fade-in zoom-in-95 duration-200`}
       >
+        {/* Mobile drag handle indicator */}
+        <div className="w-10 h-1 bg-[#262626] rounded-full mx-auto mt-2.5 sm:hidden" />
+
         {/* Header */}
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-[#232838]/60">
-            <div className="font-semibold text-lg text-gray-900 dark:text-gray-100">{title}</div>
+          <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-[#1c1c1c]">
+            <div className="font-semibold text-base sm:text-lg text-gray-100">{title}</div>
             <button
               onClick={onClose}
-              className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-100 hover:bg-[#141414] transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -66,7 +69,7 @@ export const Modal: React.FC<ModalProps> = ({
         )}
 
         {/* Content */}
-        <div className="p-6 max-h-[85vh] overflow-y-auto">{children}</div>
+        <div className="p-4 sm:p-6 max-h-[85dvh] overflow-y-auto">{children}</div>
       </div>
     </div>
   );

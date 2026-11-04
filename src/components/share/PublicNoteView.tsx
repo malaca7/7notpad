@@ -417,12 +417,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100">
+      <div className="min-h-[100dvh] flex items-center justify-center bg-black text-gray-100">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center animate-pulse">
             <Sparkles className="w-5 h-5 text-brand-400" />
           </div>
-          <p className="text-xs text-gray-500 font-medium">Carregando nota compartilhada...</p>
+          <p className="text-xs text-gray-400 font-medium">Carregando nota compartilhada...</p>
         </div>
       </div>
     );
@@ -432,22 +432,22 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
     const isDeactivated = errorMessage.toLowerCase().includes('desativad');
 
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 p-4">
-        <div className="max-w-md w-full text-center space-y-5 p-8 rounded-3xl bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] shadow-2xl">
+      <div className="min-h-[100dvh] flex items-center justify-center bg-black text-gray-100 p-4">
+        <div className="max-w-md w-full text-center space-y-5 p-6 sm:p-8 rounded-3xl bg-[#050505] border border-[#1c1c1c] shadow-2xl">
           <div className="w-16 h-16 mx-auto rounded-3xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20">
             <ShieldAlert className="w-8 h-8" />
           </div>
           
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-100">
               {isDeactivated ? 'Compartilhamento Desativado' : 'Nota Não Encontrada'}
             </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+            <p className="text-xs text-gray-400 leading-relaxed break-all">
               O link <code className="text-brand-400 font-mono bg-brand-500/10 px-1.5 py-0.5 rounded">/notpad/{slug}</code> {isDeactivated ? 'foi desativado pelo proprietário.' : 'ainda não foi sincronizado ou não existe.'}
             </p>
           </div>
 
-          <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20 text-left text-xs text-gray-600 dark:text-gray-300 space-y-2">
+          <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20 text-left text-xs text-gray-300 space-y-2">
             <div className="font-semibold text-brand-400 flex items-center gap-1.5">
               <Info className="w-4 h-4 shrink-0" />
               {isDeactivated ? 'Status do Compartilhamento' : 'Como sincronizar esta nota?'}
@@ -462,7 +462,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
           <div className="pt-1 flex flex-col gap-2">
             <button
               onClick={() => syncPublicNoteState(true)}
-              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl bg-gray-100 dark:bg-[#181b24] hover:bg-gray-200 dark:hover:bg-[#222634] text-gray-800 dark:text-gray-200 text-xs font-semibold transition-colors border border-gray-200 dark:border-[#232838]"
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl bg-[#0f0f0f] hover:bg-[#171717] text-gray-200 text-xs font-semibold transition-colors border border-[#1c1c1c]"
             >
               Tentar Carregar Novamente
             </button>
@@ -480,116 +480,153 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 flex flex-col transition-colors duration-200">
+    <div className="min-h-[100dvh] bg-black text-gray-100 flex flex-col">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md border-b border-gray-200 dark:border-[#232838] px-4 lg:px-8 py-3.5 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={onGoHome}
-            className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-xl border border-gray-200 dark:border-[#232838] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-700 dark:text-gray-300 transition-colors"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Painel 7NotPad</span>
-          </button>
+      <header className="sticky top-0 z-30 bg-black/95 backdrop-blur-md border-b border-[#1c1c1c] px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5 flex flex-col gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button
+              onClick={onGoHome}
+              className="flex items-center gap-1.5 text-xs font-semibold px-2.5 sm:px-3 py-1.5 rounded-xl border border-[#1c1c1c] bg-[#080808] hover:bg-[#121212] text-gray-200 transition-colors shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Painel 7NotPad</span>
+            </button>
 
-          <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-[#232838]">
-            {canEdit ? (
-              <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30">
-                <Edit3 className="w-3 h-3" />
-                <span>Modo Editor / Admin</span>
-              </span>
-            ) : (
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
-                Modo Somente Leitura
-              </span>
-            )}
+            <div className="hidden md:flex items-center gap-2 pl-2 border-l border-[#1c1c1c]">
+              {canEdit ? (
+                <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30">
+                  <Edit3 className="w-3 h-3" />
+                  <span>Modo Editor / Admin</span>
+                </span>
+              ) : (
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
+                  Modo Somente Leitura
+                </span>
+              )}
 
-            <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
-              <Radio className="w-3 h-3 animate-pulse" />
-              <span>Sincronizado ao vivo</span>
-            </span>
-
-            {directAccessBadge && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
-                <ShieldCheck className="w-3 h-3" />
-                <span>{directAccessBadge}</span>
+              <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
+                <Radio className="w-3 h-3 animate-pulse" />
+                <span>Sincronizado ao vivo</span>
               </span>
-            )}
 
-            {canEdit && (
-              <span className="inline-flex items-center gap-1 text-[11px] pl-1">
-                {collabSaveStatus === 'saving' ? (
-                  <span className="flex items-center gap-1 text-brand-400 font-medium animate-pulse">
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Salvando...</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-emerald-400 font-medium">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Salvo</span>
-                  </span>
-                )}
-              </span>
+              {directAccessBadge && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>{directAccessBadge}</span>
+                </span>
+              )}
+
+              {canEdit && (
+                <span className="inline-flex items-center gap-1 text-[11px] pl-1">
+                  {collabSaveStatus === 'saving' ? (
+                    <span className="flex items-center gap-1 text-brand-400 font-medium animate-pulse">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>Salvando...</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Salvo</span>
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* User / Auth status button so Admins/Members can log in directly on this URL */}
+            {currentUser ? (
+              <button
+                type="button"
+                onClick={onOpenAuthModal}
+                title="Sua conta conectada"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-semibold"
+              >
+                <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                <span className="max-w-[95px] sm:max-w-[140px] truncate">@{currentUser.username}</span>
+              </button>
+            ) : onOpenAuthModal ? (
+              <button
+                type="button"
+                onClick={onOpenAuthModal}
+                className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 text-brand-400 text-xs font-semibold transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Entrar</span>
+              </button>
+            ) : null}
+
+            <button
+              onClick={toggleTheme}
+              className="hidden sm:flex p-2 rounded-xl border border-[#1c1c1c] bg-[#080808] text-gray-300 hover:bg-[#121212] transition-colors"
+              title="Tema Preto"
+            >
+              {theme === 'dark' ? <Moon className="w-4 h-4 text-brand-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
+            </button>
+
+            {!isLocked && (
+              <button
+                onClick={handleCopyContent}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-[#0a0a0a] hover:bg-[#141414] border border-[#1c1c1c] text-xs font-medium text-gray-200 transition-colors"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span className="hidden xs:inline">{copied ? 'Copiado!' : 'Copiar'}</span>
+              </button>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* User / Auth status button so Admins/Members can log in directly on this URL */}
-          {currentUser ? (
-            <button
-              type="button"
-              onClick={onOpenAuthModal}
-              title="Sua conta conectada"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-semibold"
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              <span>@{currentUser.username}</span>
-            </button>
-          ) : onOpenAuthModal ? (
-            <button
-              type="button"
-              onClick={onOpenAuthModal}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 text-brand-400 text-xs font-semibold transition-colors"
-            >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>Entrar (@usuario)</span>
-            </button>
-          ) : null}
+        {/* Mobile Status Row (visible on smartphones) */}
+        <div className="flex md:hidden items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5">
+          {canEdit ? (
+            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30 shrink-0">
+              <Edit3 className="w-2.5 h-2.5" />
+              <span>Modo Editor / Admin</span>
+            </span>
+          ) : (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20 shrink-0">
+              Modo Leitura
+            </span>
+          )}
 
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-xl border border-gray-200 dark:border-[#232838] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
-            title="Alternar tema"
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-brand-600" />}
-          </button>
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20 shrink-0">
+            <Radio className="w-2.5 h-2.5 animate-pulse" />
+            <span>Ao vivo</span>
+          </span>
 
-          {!isLocked && (
-            <button
-              onClick={handleCopyContent}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-[#181b24] hover:bg-gray-200 dark:hover:bg-[#202430] border border-gray-200 dark:border-[#232838] text-xs font-medium transition-colors"
-            >
-              {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copied ? 'Copiado!' : 'Copiar Texto'}</span>
-            </button>
+          {canEdit && (
+            <span className="inline-flex items-center gap-1 text-[10px] pl-1 shrink-0">
+              {collabSaveStatus === 'saving' ? (
+                <span className="flex items-center gap-1 text-brand-400 font-medium animate-pulse">
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  <span>Salvando...</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                  <CheckCircle2 className="w-2.5 h-2.5" />
+                  <span>Salvo</span>
+                </span>
+              )}
+            </span>
           )}
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-8 flex flex-col justify-center">
+      <main className="flex-1 max-w-4xl w-full mx-auto p-3 sm:p-8 flex flex-col justify-center">
         {isLocked ? (
           /* Password Protection Screen */
-          <div className="max-w-md w-full mx-auto my-auto p-8 rounded-3xl bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] shadow-2xl animate-in zoom-in-95 duration-200">
+          <div className="max-w-md w-full mx-auto my-auto p-6 sm:p-8 rounded-3xl bg-[#050505] border border-[#1c1c1c] shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-500/10 text-brand-400 border border-brand-500/20 flex items-center justify-center mb-6">
               <Lock className="w-7 h-7" />
             </div>
 
-            <h2 className="text-xl font-bold text-center text-gray-900 dark:text-gray-100 mb-2">
+            <h2 className="text-xl font-bold text-center text-gray-100 mb-2">
               Nota Protegida por Senha
             </h2>
-            <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-6">
+            <p className="text-xs text-center text-gray-400 mb-6">
               O autor desta nota configurou uma senha de proteção. Insira a senha correta ou entre na sua conta autorizada para acessar.
             </p>
 
@@ -605,7 +642,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
                       setPasswordError('');
                     }}
                     placeholder="Digite a senha da nota (mín. 3 dígitos)..."
-                    className="w-full px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50 disabled:opacity-50"
+                    className="w-full px-4 py-3 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] text-sm text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50 disabled:opacity-50"
                   />
                   <KeyRound className="w-4 h-4 text-gray-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
                 </div>
@@ -645,10 +682,10 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
           </div>
         ) : (
           /* Unlocked Note Article / Collaborative Editor */
-          <article className="bg-white dark:bg-[#11131a] rounded-3xl border border-gray-200 dark:border-[#232838] shadow-xl my-4 overflow-hidden">
+          <article className="bg-[#050505] rounded-2xl sm:rounded-3xl border border-[#1c1c1c] shadow-xl my-2 sm:my-4 overflow-hidden">
             {/* Rich Text Toolbar for Creator / Admin / Editor */}
             {canEdit && (
-              <div className="border-b border-gray-200 dark:border-[#232838] bg-gray-50/60 dark:bg-[#141720]">
+              <div className="border-b border-[#1c1c1c] bg-[#080808]">
                 <EditorToolbar
                   editor={editor}
                   noteTitle={title}
@@ -657,15 +694,15 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
               </div>
             )}
 
-            <div className="p-6 sm:p-12">
+            <div className="p-4 sm:p-10 lg:p-12">
               {/* Header info & Title */}
-              <div className="border-b border-gray-100 dark:border-[#232838] pb-6 mb-8">
+              <div className="border-b border-[#1c1c1c] pb-5 sm:pb-6 mb-6 sm:mb-8">
                 {canEdit ? (
-                  <div className="mb-4">
+                  <div className="mb-3 sm:mb-4">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-purple-400 flex items-center gap-1">
-                        <Edit3 className="w-3 h-3" />
-                        Edição Liberada (Admin / Editor) — Alterações sincronizam ao vivo
+                      <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-purple-400 flex items-center gap-1">
+                        <Edit3 className="w-3 h-3 shrink-0" />
+                        <span>Edição Liberada (Admin / Editor) — Sincronização ao vivo</span>
                       </span>
                     </div>
                     <input
@@ -673,16 +710,16 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
                       value={title}
                       onChange={handleTitleEdit}
                       placeholder="Título da nota..."
-                      className="w-full text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-gray-100 bg-transparent border-b border-transparent focus:border-brand-500/50 pb-1 tracking-tight outline-none placeholder:text-gray-400 dark:placeholder:text-gray-600 transition-colors"
+                      className="w-full text-2xl sm:text-4xl font-extrabold text-gray-100 bg-transparent border-b border-transparent focus:border-brand-500/50 pb-1 tracking-tight outline-none placeholder:text-gray-600 transition-colors"
                     />
                   </div>
                 ) : (
-                  <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-gray-100 tracking-tight mb-4">
+                  <h1 className="text-2xl sm:text-4xl font-extrabold text-gray-100 tracking-tight mb-4">
                     {title || 'Nota sem título'}
                   </h1>
                 )}
 
-                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4 text-xs text-gray-400">
                   {createdAt && (
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5" />
@@ -695,7 +732,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
                       <span>Atualizada às {new Date(updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                   )}
-                  <div className="ml-auto text-xs text-brand-400 font-mono">
+                  <div className="sm:ml-auto text-[11px] text-brand-400 font-mono truncate max-w-full">
                     /notpad/{slug}
                   </div>
                 </div>
@@ -703,20 +740,20 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
 
               {/* Note Content: Interactive Editor for Admin/Editor, Read-Only HTML for Viewer */}
               {canEdit ? (
-                <div className="tiptap prose prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed min-h-[280px]">
+                <div className="tiptap prose prose-invert max-w-none text-gray-200 leading-relaxed min-h-[260px]">
                   <EditorContent editor={editor} />
                 </div>
               ) : (
                 <div 
-                  className="tiptap prose prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed min-h-[200px]"
+                  className="tiptap prose prose-invert max-w-none text-gray-200 leading-relaxed min-h-[200px]"
                   dangerouslySetInnerHTML={{ __html: content }}
                 />
               )}
 
               {/* Attachments Section if any */}
               {attachments && attachments.length > 0 && (
-                <div className="mt-12 pt-6 border-t border-gray-100 dark:border-[#232838]">
-                  <h2 className="text-sm font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-3 flex items-center gap-2">
+                <div className="mt-10 sm:mt-12 pt-6 border-t border-[#1c1c1c]">
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-2">
                     <FileText className="w-4 h-4 text-brand-400" />
                     Anexos ({attachments.length})
                   </h2>
@@ -724,12 +761,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
                     {attachments.map((att) => (
                       <div
                         key={att.id}
-                        className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838]"
+                        className="flex items-center justify-between p-3 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c]"
                       >
                         <div className="flex items-center gap-2.5 truncate">
                           <FileText className="w-4 h-4 text-brand-400 shrink-0" />
                           <div className="truncate text-xs">
-                            <div className="font-medium text-gray-800 dark:text-gray-200 truncate">{att.file_name}</div>
+                            <div className="font-medium text-gray-200 truncate">{att.file_name}</div>
                             <div className="text-[10px] text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</div>
                           </div>
                         </div>
@@ -737,7 +774,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
                           <a
                             href={att.data_url}
                             download={att.file_name}
-                            className="p-2 text-gray-500 hover:text-brand-400 transition-colors"
+                            className="p-2 text-gray-400 hover:text-brand-400 transition-colors"
                             title="Baixar arquivo"
                           >
                             <Download className="w-4 h-4" />
@@ -763,7 +800,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
       )}
 
       {/* Public Footer */}
-      <footer className="text-center py-6 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-[#232838]">
+      <footer className="text-center py-5 sm:py-6 px-4 text-xs text-gray-500 border-t border-[#1c1c1c] bg-black">
         Desenvolvido com <span className="text-brand-400">7NotPad</span> — Bloco de notas rápido e colaborativo.
       </footer>
     </div>

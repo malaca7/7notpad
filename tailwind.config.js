@@ -57,11 +57,11 @@ export default {
           glow: '#6366f1',
         },
         dark: {
-          bg: '#090a0f',        // Ultra-deep graphite/black
-          surface: '#11131a',   // Card & sidebar surface
-          surface2: '#181b24',  // Elevated surface / hovers
-          border: '#232838',    // Border line
-          muted: '#8e96a8',     // Subdued text
+          bg: '#000000',        // Pure OLED black
+          surface: '#050505',   // Deep carbon black card & sidebar surface
+          surface2: '#0d0d0d',  // Elevated black surface / hovers
+          border: '#1c1c1c',    // Subtle dark border line
+          muted: '#8a8a8a',     // Subdued text
         }
       },
       borderRadius: {
