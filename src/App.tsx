@@ -14,7 +14,7 @@ import { LandingHome } from './components/home/LandingHome';
 import { useNotes } from './hooks/useNotes';
 import { useAuth } from './hooks/useAuth';
 import { getLocalNotes } from './lib/storage';
-import { FileText, Plus, Share2, Copy, Check, Settings, Home } from 'lucide-react';
+import { FileText, Plus, Share2, Copy, Check, Settings } from 'lucide-react';
 
 export function MainLayout() {
   const { isAuthenticated } = useAuth();
@@ -31,12 +31,6 @@ export function MainLayout() {
     updateShare,
     loadNotes,
   } = useNotes();
-
-  const [hasEnteredWorkspace, setHasEnteredWorkspace] = useState(() => {
-    const path = window.location.pathname;
-    const hash = window.location.hash;
-    return Boolean(path.includes('/notpad/') || hash.includes('/notpad/') || path.includes('/n/'));
-  });
 
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
@@ -71,7 +65,7 @@ export function MainLayout() {
     if (path.includes('/notpad/')) {
       const parts = path.split('/notpad/');
       const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
-      if (slug) return slug;
+      if (slug && slug !== 'notpad') return slug;
     }
     // Check /n/
     if (path.includes('/n/')) {
@@ -83,7 +77,7 @@ export function MainLayout() {
     if (hash.includes('#/notpad/')) {
       const parts = hash.split('#/notpad/');
       const slug = parts[parts.length - 1]?.split('#')[0]?.replace(/\/+$/, '').trim();
-      if (slug) return slug;
+      if (slug && slug !== 'notpad') return slug;
     }
     if (hash.includes('#/n/')) {
       const parts = hash.split('#/n/');
@@ -115,17 +109,64 @@ export function MainLayout() {
 
   const [publicSlug, setPublicSlug] = useState<string | null>(() => resolveRoute().publicSlug);
 
+  // REGRA: SE NÃO TIVER LOGADO, QUALQUER URL E SUB-URL VAI PARA A TELA DE INÍCIO!
+  useEffect(() => {
+    if (!isAuthenticated) {
+      const slug = getSlugFromLocation();
+      if (slug) {
+        try {
+          sessionStorage.setItem('7notpad_pending_redirect', slug);
+        } catch {}
+      }
+      try {
+        const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+        const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+        const currentPath = window.location.pathname;
+        if (currentPath !== cleanBase && currentPath !== `${cleanBase}/` && currentPath !== '/') {
+          window.history.replaceState({}, '', cleanBase || '/');
+        }
+      } catch {}
+    }
+  }, [isAuthenticated]);
+
+  // REGRA: SE TIVER LOGADO, AO ACESSAR A RAIZ VAI PARA /notpad!
+  useEffect(() => {
+    if (isAuthenticated) {
+      try {
+        const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+        const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+        
+        // Check if there was a pending note link saved before login
+        const pending = sessionStorage.getItem('7notpad_pending_redirect');
+        if (pending) {
+          sessionStorage.removeItem('7notpad_pending_redirect');
+          const targetPath = `${cleanBase}/notpad/${pending}`;
+          window.history.replaceState({}, '', targetPath);
+          setPublicSlug(pending);
+          return;
+        }
+
+        const currentPath = window.location.pathname;
+        if (currentPath === cleanBase || currentPath === `${cleanBase}/` || currentPath === '/') {
+          const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : `${cleanBase}/notpad`;
+          window.history.replaceState({}, '', targetPath);
+        }
+      } catch {}
+    }
+  }, [isAuthenticated, activeNoteId]);
+
   // Sync initial URL note ID into activeNoteId if owner opened /notpad/<note.id>
   useEffect(() => {
+    if (!isAuthenticated) return;
     const route = resolveRoute();
     if (route.editorNoteId) {
       setActiveNoteId(route.editorNoteId);
     }
-  }, [setActiveNoteId]);
+  }, [setActiveNoteId, isAuthenticated]);
 
   // Keep browser address bar at /notpad/<ID_UNICO_DO_BLOCO_DE_NOTA> when editing a note
   useEffect(() => {
-    if (publicSlug || !activeNoteId) return;
+    if (!isAuthenticated || publicSlug || !activeNoteId) return;
     try {
       const params = new URLSearchParams(window.location.search);
       if (params.get('reset_token')) return;
@@ -138,7 +179,7 @@ export function MainLayout() {
         window.history.replaceState({}, '', targetPath);
       }
     } catch {}
-  }, [activeNoteId, publicSlug]);
+  }, [activeNoteId, publicSlug, isAuthenticated]);
 
   // Check URL parameters for reset_token or password-reset hash
   useEffect(() => {
@@ -157,6 +198,7 @@ export function MainLayout() {
   }, []);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     const handleLocationChange = () => {
       const route = resolveRoute();
       setPublicSlug(route.publicSlug);
@@ -171,17 +213,55 @@ export function MainLayout() {
       window.removeEventListener('popstate', handleLocationChange);
       window.removeEventListener('hashchange', handleLocationChange);
     };
-  }, [setActiveNoteId]);
+  }, [setActiveNoteId, isAuthenticated]);
 
   const handleGoHome = () => {
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
     const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
-    const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : baseUrl;
+    const targetPath = activeNoteId ? `${cleanBase}/notpad/${activeNoteId}` : `${cleanBase}/notpad`;
     window.history.pushState({}, '', targetPath);
     setPublicSlug(null);
   };
 
-  // If visiting public note link
+  // ========================================================
+  // 1. SE NÃO TIVER LOGADO: QUALQUER URL/SUB-URL VAI PARA TELA DE INÍCIO!
+  // ========================================================
+  if (!isAuthenticated) {
+    return (
+      <>
+        <LandingHome
+          onStartWriting={() => {
+            setAuthModalView('signup');
+            setIsAuthModalOpen(true);
+          }}
+          onOpenAuth={(view) => {
+            setAuthModalView(view);
+            setIsAuthModalOpen(true);
+          }}
+          localNotesCount={notes.length}
+        />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialView={authModalView}
+          initialEmail={authEmail}
+          resetToken={resetTokenParam}
+          onSuccess={() => {
+            loadNotes();
+          }}
+          onOpenSettings={(tab) => {
+            if (tab) setSettingsInitialTab(tab);
+            setIsSettingsModalOpen(true);
+          }}
+        />
+        <EmailNotificationToast />
+      </>
+    );
+  }
+
+  // ========================================================
+  // 2. SE TIVER LOGADO: VISUALIZAÇÃO PÚBLICA / COLABORATIVA
+  // ========================================================
   if (publicSlug) {
     return (
       <>
@@ -212,42 +292,9 @@ export function MainLayout() {
     );
   }
 
-  // If user is unlogged and hasn't explicitly entered the workspace, display the Clean Landing Home!
-  if (!isAuthenticated && !hasEnteredWorkspace) {
-    return (
-      <>
-        <LandingHome
-          onStartWriting={() => {
-            if (!activeNote && notes.length === 0) {
-              createNote();
-            }
-            setHasEnteredWorkspace(true);
-          }}
-          onOpenAuth={(view) => {
-            setAuthModalView(view);
-            setIsAuthModalOpen(true);
-          }}
-          localNotesCount={notes.length}
-        />
-        <AuthModal
-          isOpen={isAuthModalOpen}
-          onClose={() => setIsAuthModalOpen(false)}
-          initialView={authModalView}
-          initialEmail={authEmail}
-          resetToken={resetTokenParam}
-          onSuccess={() => {
-            loadNotes();
-            setHasEnteredWorkspace(true);
-          }}
-          onOpenSettings={(tab) => {
-            if (tab) setSettingsInitialTab(tab);
-            setIsSettingsModalOpen(true);
-          }}
-        />
-        <EmailNotificationToast />
-      </>
-    );
-  }
+  // ========================================================
+  // 3. SE TIVER LOGADO: WORKSPACE EM /notpad
+  // ========================================================
 
   return (
     <div className="flex flex-col h-[100dvh] w-screen bg-black text-gray-100 overflow-hidden font-sans">
@@ -266,7 +313,6 @@ export function MainLayout() {
           setIsAuthModalOpen(true);
         }}
         totalNotes={notes.length}
-        onReturnHome={!isAuthenticated ? () => setHasEnteredWorkspace(false) : undefined}
       />
 
       {/* Main Workspace Body */}
@@ -315,17 +361,6 @@ export function MainLayout() {
 
       {/* Dedicated Mobile Bottom Navigation Bar */}
       <nav className="md:hidden h-14 border-t border-[#1c1c1c] bg-[#050505]/95 backdrop-blur-md px-2 flex items-center justify-around shrink-0 z-20 select-none">
-        {!isAuthenticated && (
-          <button
-            type="button"
-            onClick={() => setHasEnteredWorkspace(false)}
-            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium text-gray-400 active:text-white transition-colors"
-          >
-            <Home className="w-4 h-4 text-brand-400" />
-            <span>Início</span>
-          </button>
-        )}
-
         <button
           type="button"
           onClick={() => setIsMobileSidebarOpen(prev => !prev)}
