@@ -162,10 +162,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       syncPublicNoteState(false);
     });
 
-    // 2. Live cloud polling every 1.8s for visitors across any browser/device
+    // 2. Live cloud polling every 2.5s when tab is visible for visitors across any browser/device
     const pollInterval = setInterval(() => {
-      syncPublicNoteState(false);
-    }, 1800);
+      if (document.visibilityState === 'visible') {
+        syncPublicNoteState(false);
+      }
+    }, 2500);
 
     // 3. Immediate sync on tab focus / visibility change
     const handleFocus = () => syncPublicNoteState(false);
@@ -274,7 +276,6 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
 
   if (notFound) {
     const isDeactivated = errorMessage.toLowerCase().includes('desativad');
-    const isFirebaseUnconfigured = errorMessage.toLowerCase().includes('firestore') || errorMessage.toLowerCase().includes('permission_denied') || errorMessage.toLowerCase().includes('api has not been used');
 
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 p-4">
@@ -288,25 +289,29 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
               {isDeactivated ? 'Compartilhamento Desativado' : 'Nota Não Encontrada'}
             </h1>
             <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-              O link <code className="text-brand-400 font-mono bg-brand-500/10 px-1.5 py-0.5 rounded">/notpad/{slug}</code> {isDeactivated ? 'foi desativado pelo proprietário.' : 'não foi localizado.'}
+              O link <code className="text-brand-400 font-mono bg-brand-500/10 px-1.5 py-0.5 rounded">/notpad/{slug}</code> {isDeactivated ? 'foi desativado pelo proprietário.' : 'ainda não foi sincronizado ou não existe.'}
             </p>
           </div>
 
           <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20 text-left text-xs text-gray-600 dark:text-gray-300 space-y-2">
             <div className="font-semibold text-brand-400 flex items-center gap-1.5">
               <Info className="w-4 h-4 shrink-0" />
-              {isDeactivated ? 'Status do Compartilhamento' : 'Por que isso acontece?'}
+              {isDeactivated ? 'Status do Compartilhamento' : 'Como sincronizar esta nota?'}
             </div>
             <p className="leading-relaxed opacity-90">
               {isDeactivated 
                 ? 'O proprietário da nota desativou o link público nas opções de compartilhamento.'
-                : isFirebaseUnconfigured
-                ? 'Para sincronizar links curtos /notpad/:slug entre navegadores diferentes, o Cloud Firestore precisa estar ativado no Firebase Console (Projeto malacagroup -> Firestore Database -> Criar banco de dados).'
-                : 'Esta nota pode ter sido criada sem ativar o compartilhamento, ou o link foi digitado incorretamente. Se você é o proprietário, abra a nota no seu navegador original, clique em Compartilhar e copie o link novamente.'}
+                : 'Se você criou esta nota, basta abrir o painel principal do 7NotPad ou clicar em Salvar Alterações em Compartilhar para sincronizá-la instantaneamente com a nuvem.'}
             </p>
           </div>
 
-          <div className="pt-1">
+          <div className="pt-1 flex flex-col gap-2">
+            <button
+              onClick={() => syncPublicNoteState(true)}
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl bg-gray-100 dark:bg-[#181b24] hover:bg-gray-200 dark:hover:bg-[#222634] text-gray-800 dark:text-gray-200 text-xs font-semibold transition-colors border border-gray-200 dark:border-[#232838]"
+            >
+              Tentar Carregar Novamente
+            </button>
             <button
               onClick={onGoHome}
               className="w-full inline-flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-brand-600/20"

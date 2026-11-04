@@ -2,36 +2,45 @@ import type { Note, NoteShare } from '../types/note';
 
 const KV_APP_KEY = '05twva90';
 const KV_BASE_URL = `https://keyvalue.immanuel.co/api/KeyVal`;
-const OBJECTS_API_URL = 'https://api.restful-api.dev/objects';
-const CLOUD_IDS_STORAGE_KEY = '7notpad_cloud_object_ids';
+const TELEGRAPH_API_URL = 'https://api.telegra.ph';
+const TELEGRAPH_DEFAULT_TOKEN = '58462b400e5834a86409addac7e876e3f1648478034b60f910f8a64c578e';
+const NTFY_BASE_URL = 'https://ntfy.sh';
+const CLOUD_IDS_STORAGE_KEY = '7notpad_cloud_paths_v2';
 
 // In-memory cache & serialization queues to prevent concurrent race conditions
-const memoryCloudIds: Record<string, string> = {};
+const memoryCloudPaths: Record<string, string> = {};
 const inFlightSyncs = new Map<string, Promise<boolean>>();
 const pendingSyncPayloads = new Map<string, { note: Note; explicitShare?: NoteShare | null }>();
 
-function getCloudObjectIds(): Record<string, string> {
+function isValidTelegraphPath(val: string): boolean {
+  if (!val || val === 'null') return false;
+  // Reject legacy 32-char hex IDs from restful-api.dev
+  if (/^[0-9a-f]{32}$/i.test(val)) return false;
+  return val.length >= 4;
+}
+
+function getCloudPaths(): Record<string, string> {
   try {
     const raw = localStorage.getItem(CLOUD_IDS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    return { ...parsed, ...memoryCloudIds };
+    return { ...parsed, ...memoryCloudPaths };
   } catch {
-    return { ...memoryCloudIds };
+    return { ...memoryCloudPaths };
   }
 }
 
-function saveCloudObjectId(key: string, cloudObjectId: string): void {
-  if (!key || !cloudObjectId) return;
-  memoryCloudIds[key] = cloudObjectId;
+function saveCloudPath(key: string, cloudPath: string): void {
+  if (!key || !isValidTelegraphPath(cloudPath)) return;
+  memoryCloudPaths[key] = cloudPath;
   try {
     const raw = localStorage.getItem(CLOUD_IDS_STORAGE_KEY);
     const map = raw ? JSON.parse(raw) : {};
-    map[key] = cloudObjectId;
+    map[key] = cloudPath;
     localStorage.setItem(CLOUD_IDS_STORAGE_KEY, JSON.stringify(map));
   } catch {}
 }
 
-function withTimeout<T>(promise: Promise<T>, ms = 4000): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms = 4500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -40,12 +49,12 @@ function withTimeout<T>(promise: Promise<T>, ms = 4000): Promise<T> {
   ]);
 }
 
-// Sanitize key for keyvalue.immanuel.co path segment (alphanumeric, -, _)
+// Sanitize key for keyvalue.immanuel.co and ntfy.sh topic names (alphanumeric, -, _)
 function sanitizeKey(slug: string): string {
   return slug.trim().replace(/[^a-zA-Z0-9-_]/g, '_');
 }
 
-async function lookupCloudObjectIdFromKV(slug: string): Promise<string> {
+async function lookupCloudPathFromKV(slug: string): Promise<string> {
   const cleanKey = sanitizeKey(slug);
   try {
     const kvRes = await withTimeout(
@@ -56,13 +65,202 @@ async function lookupCloudObjectIdFromKV(slug: string): Promise<string> {
     if (kvRes.ok) {
       const text = await kvRes.text();
       const val = text.replace(/^"+|"+$/g, '').trim();
-      if (val && val !== 'null') {
-        saveCloudObjectId(slug, val);
+      if (isValidTelegraphPath(val)) {
+        saveCloudPath(slug, val);
         return val;
       }
     }
   } catch {}
   return '';
+}
+
+/**
+ * Save JSON document to Telegraph (unlimited requests, CORS: *, permanent) + KV index + Ntfy backup
+ */
+async function saveCloudDocument(
+  primaryKey: string,
+  data: Record<string, any>,
+  extraKeys: string[] = []
+): Promise<string> {
+  const cleanPrimary = sanitizeKey(primaryKey);
+  const paths = getCloudPaths();
+  let cloudPath = paths[primaryKey] || paths[cleanPrimary] || '';
+
+  if (!isValidTelegraphPath(cloudPath)) {
+    cloudPath = await lookupCloudPathFromKV(primaryKey);
+  }
+
+  const serializedData = JSON.stringify(data);
+  const contentNodes = JSON.stringify([{ tag: 'p', children: [serializedData] }]);
+
+  // 1. Update existing Telegraph page in-place if path exists
+  if (isValidTelegraphPath(cloudPath)) {
+    try {
+      const form = new URLSearchParams();
+      form.set('access_token', TELEGRAPH_DEFAULT_TOKEN);
+      form.set('title', '7np');
+      form.set('content', contentNodes);
+
+      const editRes = await withTimeout(
+        fetch(`${TELEGRAPH_API_URL}/editPage/${cloudPath}`, {
+          method: 'POST',
+          body: form,
+        })
+      );
+      if (editRes.ok) {
+        const editJson = await editRes.json();
+        if (!editJson?.ok) {
+          cloudPath = '';
+        }
+      } else {
+        cloudPath = '';
+      }
+    } catch {
+      cloudPath = '';
+    }
+  }
+
+  // 2. Create new Telegraph page if needed (short title '7np' keeps path short for KV index)
+  if (!isValidTelegraphPath(cloudPath)) {
+    try {
+      const form = new URLSearchParams();
+      form.set('access_token', TELEGRAPH_DEFAULT_TOKEN);
+      form.set('title', '7np');
+      form.set('content', contentNodes);
+
+      const createRes = await withTimeout(
+        fetch(`${TELEGRAPH_API_URL}/createPage`, {
+          method: 'POST',
+          body: form,
+        })
+      );
+      if (createRes.ok) {
+        const createJson = await createRes.json();
+        if (createJson?.ok && createJson?.result?.path) {
+          cloudPath = createJson.result.path;
+        }
+      }
+    } catch {}
+  }
+
+  const allKeys = Array.from(new Set([primaryKey, ...extraKeys].filter(Boolean)));
+
+  if (isValidTelegraphPath(cloudPath)) {
+    for (const k of allKeys) {
+      saveCloudPath(k, cloudPath);
+    }
+
+    // Update KV index for all keys (note.id and custom_slug)
+    await Promise.all(
+      allKeys.map((k) =>
+        withTimeout(
+          fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${sanitizeKey(k)}/${cloudPath}`, {
+            method: 'POST',
+          })
+        ).catch(() => null)
+      )
+    );
+  }
+
+  // 3. Also publish to Ntfy real-time backup channel (either full payload or telegraph_path pointer)
+  const ntfyPayload =
+    serializedData.length < 3500
+      ? JSON.stringify({ ...data, _telegraph_path: cloudPath })
+      : JSON.stringify({ _telegraph_path: cloudPath });
+
+  for (const k of allKeys) {
+    fetch(`${NTFY_BASE_URL}/7notpad_doc_${sanitizeKey(k)}`, {
+      method: 'POST',
+      body: ntfyPayload,
+    }).catch(() => {});
+  }
+
+  return cloudPath || 'ntfy_synced';
+}
+
+/**
+ * Fetch JSON document by key from Telegraph (via KV index) or Ntfy fallback
+ */
+async function fetchCloudDocument(key: string): Promise<Record<string, any> | null> {
+  const cleanKey = sanitizeKey(key);
+  const paths = getCloudPaths();
+  let cloudPath = paths[key] || paths[cleanKey] || '';
+
+  if (!isValidTelegraphPath(cloudPath)) {
+    cloudPath = await lookupCloudPathFromKV(key);
+  }
+
+  const parseTelegraphResponse = async (pathToFetch: string): Promise<Record<string, any> | null> => {
+    try {
+      const res = await withTimeout(
+        fetch(`${TELEGRAPH_API_URL}/getPage/${pathToFetch}?return_content=true&_t=${Date.now()}`, {
+          cache: 'no-store',
+        })
+      );
+      if (!res.ok) return null;
+      const json = await res.json();
+      const rawText = json?.result?.content?.[0]?.children?.[0];
+      if (typeof rawText === 'string' && rawText.trim().startsWith('{')) {
+        return JSON.parse(rawText);
+      }
+    } catch {}
+    return null;
+  };
+
+  if (isValidTelegraphPath(cloudPath)) {
+    let doc = await parseTelegraphResponse(cloudPath);
+    if (!doc) {
+      const freshPath = await lookupCloudPathFromKV(key);
+      if (isValidTelegraphPath(freshPath) && freshPath !== cloudPath) {
+        cloudPath = freshPath;
+        doc = await parseTelegraphResponse(cloudPath);
+      }
+    }
+    if (doc) {
+      saveCloudPath(key, cloudPath);
+      return doc;
+    }
+  }
+
+  // Fallback: check Ntfy cached stream for this key
+  try {
+    const ntfyRes = await withTimeout(
+      fetch(`${NTFY_BASE_URL}/7notpad_doc_${cleanKey}/json?poll=1&since=all`, {
+        cache: 'no-store',
+      })
+    );
+    if (ntfyRes.ok) {
+      const text = (await ntfyRes.text()).trim();
+      if (text) {
+        const lines = text.split('\n').filter(Boolean);
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const event = JSON.parse(lines[i]);
+            if (event?.event === 'message' && typeof event.message === 'string') {
+              const parsed = JSON.parse(event.message);
+              if (parsed && typeof parsed === 'object') {
+                if (parsed.note || parsed.users || parsed.config) {
+                  if (parsed._telegraph_path && isValidTelegraphPath(parsed._telegraph_path)) {
+                    saveCloudPath(key, parsed._telegraph_path);
+                  }
+                  return parsed;
+                }
+                if (parsed._telegraph_path && isValidTelegraphPath(parsed._telegraph_path)) {
+                  const fromTelegraph = await parseTelegraphResponse(parsed._telegraph_path);
+                  if (fromTelegraph) {
+                    saveCloudPath(key, parsed._telegraph_path);
+                    return fromTelegraph;
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  return null;
 }
 
 async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | null): Promise<boolean> {
@@ -100,71 +298,13 @@ async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | nu
       },
     };
 
-    const cloudIds = getCloudObjectIds();
-    let cloudObjectId = cloudIds[note.id] || (effectiveShare.custom_slug ? cloudIds[effectiveShare.custom_slug] : '');
+    const extraKeys =
+      effectiveShare.custom_slug && effectiveShare.custom_slug !== note.id
+        ? [effectiveShare.custom_slug]
+        : [];
 
-    // If not in local cache yet, check KV store first so all devices share the same object ID
-    if (!cloudObjectId) {
-      cloudObjectId = await lookupCloudObjectIdFromKV(note.id);
-    }
-
-    // 1. Update existing cloud object if we already have an ID
-    if (cloudObjectId) {
-      const putRes = await withTimeout(
-        fetch(`${OBJECTS_API_URL}/${cloudObjectId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: `7notpad_${note.id}`,
-            data: payload,
-          }),
-        })
-      );
-      if (!putRes.ok) {
-        cloudObjectId = '';
-      }
-    }
-
-    // 2. Otherwise create a new cloud object
-    if (!cloudObjectId) {
-      const postRes = await withTimeout(
-        fetch(OBJECTS_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: `7notpad_${note.id}`,
-            data: payload,
-          }),
-        })
-      );
-      if (!postRes.ok) return false;
-      const postData = await postRes.json();
-      cloudObjectId = postData?.id;
-      if (!cloudObjectId) return false;
-    }
-
-    saveCloudObjectId(note.id, cloudObjectId);
-    if (effectiveShare.custom_slug) {
-      saveCloudObjectId(effectiveShare.custom_slug, cloudObjectId);
-    }
-
-    // 3. Map both note.id and custom_slug -> cloudObjectId in KV store
-    const keysToMap = new Set<string>([sanitizeKey(note.id)]);
-    if (effectiveShare.custom_slug) {
-      keysToMap.add(sanitizeKey(effectiveShare.custom_slug));
-    }
-
-    await Promise.all(
-      Array.from(keysToMap).map((k) =>
-        withTimeout(
-          fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${k}/${cloudObjectId}`, {
-            method: 'POST',
-          })
-        ).catch(() => null)
-      )
-    );
-
-    return true;
+    const savedPath = await saveCloudDocument(note.id, payload, extraKeys);
+    return Boolean(savedPath);
   } catch (err) {
     console.warn('CloudShareService.syncNoteToCloud warning:', err);
     return false;
@@ -178,7 +318,6 @@ export const CloudShareService = {
   async syncNoteToCloud(note: Note, explicitShare?: NoteShare | null): Promise<boolean> {
     const existingPromise = inFlightSyncs.get(note.id);
     if (existingPromise) {
-      // Queue latest state so as soon as current request finishes, the newest state is synced
       pendingSyncPayloads.set(note.id, { note, explicitShare });
       return existingPromise;
     }
@@ -211,58 +350,9 @@ export const CloudShareService = {
     error?: string;
   }> {
     try {
-      const cleanKey = sanitizeKey(slug);
-      const cachedIds = getCloudObjectIds();
-      let cloudObjectId = cachedIds[slug] || cachedIds[cleanKey] || '';
-
-      // 1. Look up cloudObjectId from KV store if not cached yet
-      if (!cloudObjectId) {
-        cloudObjectId = await lookupCloudObjectIdFromKV(slug);
-      }
-
-      // If slug itself looks like a direct hex objectId (24-36 hex chars), try it directly as fallback
-      if (!cloudObjectId && /^[a-f0-9]{24,36}$/i.test(cleanKey)) {
-        cloudObjectId = cleanKey;
-      }
-
-      if (!cloudObjectId || cloudObjectId === 'null') {
-        return { found: false };
-      }
-
-      // 2. Fetch full note payload from Objects API with cache: 'no-store'
-      let objRes = await withTimeout(
-        fetch(`${OBJECTS_API_URL}/${cloudObjectId}`, {
-          cache: 'no-store',
-        })
-      );
-
-      // If cached cloudObjectId became stale/replaced, re-query KV store once
-      if (!objRes.ok) {
-        const freshId = await lookupCloudObjectIdFromKV(slug);
-        if (freshId && freshId !== cloudObjectId) {
-          cloudObjectId = freshId;
-          objRes = await withTimeout(
-            fetch(`${OBJECTS_API_URL}/${cloudObjectId}`, {
-              cache: 'no-store',
-            })
-          );
-        }
-      }
-
-      if (!objRes.ok) {
-        return { found: false };
-      }
-
-      const objJson = await objRes.json();
-      const data = objJson?.data;
+      const data = await fetchCloudDocument(slug);
       if (!data || !data.note || !data.share) {
         return { found: false };
-      }
-
-      // Cache mapping for fast 1-hop polling on subsequent ticks
-      saveCloudObjectId(slug, cloudObjectId);
-      if (data.note.id) {
-        saveCloudObjectId(data.note.id, cloudObjectId);
       }
 
       const share: NoteShare = data.share;
@@ -305,26 +395,14 @@ export const CloudShareService = {
    */
   async syncPlatformUser(user: { id: string; username: string; full_name: string }): Promise<void> {
     try {
-      const dirKey = '7notpad_users_directory_v1';
-      let objectId = await lookupCloudObjectIdFromKV(dirKey);
+      const dirKey = '7notpad_users_directory_v2';
       let existingUsers: Array<{ id: string; username: string; full_name: string }> = [
         { id: 'usr_malaca_admin', username: 'malaca', full_name: 'Malaca' },
       ];
 
-      if (objectId) {
-        try {
-          const getRes = await withTimeout(fetch(`${OBJECTS_API_URL}/${objectId}`, { cache: 'no-store' }));
-          if (getRes.ok) {
-            const json = await getRes.json();
-            if (Array.isArray(json?.data?.users)) {
-              existingUsers = json.data.users;
-            }
-          } else {
-            objectId = '';
-          }
-        } catch {
-          objectId = '';
-        }
+      const currentDoc = await fetchCloudDocument(dirKey);
+      if (currentDoc && Array.isArray(currentDoc.users)) {
+        existingUsers = currentDoc.users;
       }
 
       const cleanUsername = user.username.trim().toLowerCase().replace(/^@+/, '');
@@ -335,43 +413,7 @@ export const CloudShareService = {
         full_name: user.full_name || cleanUsername,
       });
 
-      if (objectId) {
-        const putRes = await withTimeout(
-          fetch(`${OBJECTS_API_URL}/${objectId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: dirKey,
-              data: { users: filtered },
-            }),
-          })
-        );
-        if (!putRes.ok) objectId = '';
-      }
-
-      if (!objectId) {
-        const postRes = await withTimeout(
-          fetch(OBJECTS_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: dirKey,
-              data: { users: filtered },
-            }),
-          })
-        );
-        if (postRes.ok) {
-          const postData = await postRes.json();
-          objectId = postData?.id || '';
-          if (objectId) {
-            await withTimeout(
-              fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${dirKey}/${objectId}`, {
-                method: 'POST',
-              })
-            );
-          }
-        }
-      }
+      await saveCloudDocument(dirKey, { users: filtered });
     } catch {}
   },
 
@@ -381,16 +423,11 @@ export const CloudShareService = {
   async fetchPlatformUsers(): Promise<Array<{ id: string; username: string; full_name: string }>> {
     const fallback = [{ id: 'usr_malaca_admin', username: 'malaca', full_name: 'Malaca' }];
     try {
-      const dirKey = '7notpad_users_directory_v1';
-      const objectId = await lookupCloudObjectIdFromKV(dirKey);
-      if (!objectId) return fallback;
-
-      const res = await withTimeout(fetch(`${OBJECTS_API_URL}/${objectId}`, { cache: 'no-store' }));
-      if (!res.ok) return fallback;
-      const json = await res.json();
-      if (Array.isArray(json?.data?.users)) {
+      const dirKey = '7notpad_users_directory_v2';
+      const doc = await fetchCloudDocument(dirKey);
+      if (doc && Array.isArray(doc.users)) {
         const map = new Map<string, { id: string; username: string; full_name: string }>();
-        for (const u of [...fallback, ...json.data.users]) {
+        for (const u of [...fallback, ...doc.users]) {
           if (u && u.username) {
             map.set(u.username.toLowerCase(), u);
           }
@@ -408,46 +445,8 @@ export const CloudShareService = {
    */
   async syncEmailConfigToCloud(config: Record<string, any>): Promise<void> {
     try {
-      const cfgKey = '7notpad_email_config_v1';
-      let objectId = await lookupCloudObjectIdFromKV(cfgKey);
-
-      if (objectId) {
-        const putRes = await withTimeout(
-          fetch(`${OBJECTS_API_URL}/${objectId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: cfgKey,
-              data: { config, updated_at: new Date().toISOString() },
-            }),
-          })
-        );
-        if (!putRes.ok) objectId = '';
-      }
-
-      if (!objectId) {
-        const postRes = await withTimeout(
-          fetch(OBJECTS_API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: cfgKey,
-              data: { config, updated_at: new Date().toISOString() },
-            }),
-          })
-        );
-        if (postRes.ok) {
-          const postData = await postRes.json();
-          objectId = postData?.id || '';
-          if (objectId) {
-            await withTimeout(
-              fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${cfgKey}/${objectId}`, {
-                method: 'POST',
-              })
-            );
-          }
-        }
-      }
+      const cfgKey = '7notpad_email_config_v2';
+      await saveCloudDocument(cfgKey, { config, updated_at: new Date().toISOString() });
     } catch {}
   },
 
@@ -456,15 +455,10 @@ export const CloudShareService = {
    */
   async fetchEmailConfigFromCloud(): Promise<Record<string, any> | null> {
     try {
-      const cfgKey = '7notpad_email_config_v1';
-      const objectId = await lookupCloudObjectIdFromKV(cfgKey);
-      if (!objectId) return null;
-
-      const res = await withTimeout(fetch(`${OBJECTS_API_URL}/${objectId}`, { cache: 'no-store' }));
-      if (!res.ok) return null;
-      const json = await res.json();
-      if (json?.data?.config && typeof json.data.config === 'object') {
-        return json.data.config;
+      const cfgKey = '7notpad_email_config_v2';
+      const doc = await fetchCloudDocument(cfgKey);
+      if (doc?.config && typeof doc.config === 'object') {
+        return doc.config;
       }
       return null;
     } catch {

@@ -255,15 +255,21 @@ export const StorageService = {
         saveLocalNotes(mergedNotes);
         return mergedNotes;
       } else if (freshLocalNotes.length > 0) {
-        // Sync local notes to Firebase in background (non-blocking)
+        // Sync local notes to Cloud & Firebase in background (non-blocking)
+        const allLocalShares = getLocalShares();
         let updatedLocally = false;
         for (const localNote of freshLocalNotes) {
           if (currentUserId && !localNote.user_id) {
             localNote.user_id = currentUserId;
             updatedLocally = true;
           }
+          const matchedShare =
+            localNote.share ||
+            allLocalShares[localNote.id] ||
+            Object.values(allLocalShares).find((s) => s.note_id === localNote.id) ||
+            null;
           FirebaseService.saveNote(localNote).catch(() => {});
-          CloudShareService.syncNoteToCloud(localNote).catch(() => {});
+          CloudShareService.syncNoteToCloud(localNote, matchedShare).catch(() => {});
         }
         if (updatedLocally) {
           saveLocalNotes(freshLocalNotes);
