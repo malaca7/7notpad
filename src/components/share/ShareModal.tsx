@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import type { Note, NoteShare } from '../../types/note';
-import { StorageService } from '../../lib/storage';
+import { StorageService, markNoteUnlockedInCurrentTab } from '../../lib/storage';
 import { generateSalt, hashPassword, slugify } from '../../lib/crypto';
 import { useToast } from '../common/Toast';
 import confetti from 'canvas-confetti';
@@ -47,7 +47,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [isSlugConflict, setIsSlugConflict] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // Sync state when modal opens or note changes
+  // Sync state when modal opens or active note ID changes
   useEffect(() => {
     if (isOpen) {
       if (note.share) {
@@ -70,7 +70,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setIsSlugConflict(false);
       setCopied(false);
     }
-  }, [isOpen, note]);
+  }, [isOpen, note.id]);
+
+  // Keep share state synced if updated from another screen/tab while modal is open
+  useEffect(() => {
+    if (!isOpen || !note.share || isSaving) return;
+    setIsActive(note.share.is_active);
+    setIsPasswordProtected(note.share.is_password_protected);
+    if (note.share.custom_slug) {
+      setSlug(note.share.custom_slug);
+    }
+  }, [isOpen, isSaving, note.share?.updated_at, note.share?.is_active, note.share?.is_password_protected, note.share?.custom_slug]);
 
   // Check slug availability when slug changes
   useEffect(() => {
@@ -132,6 +142,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       if (password.trim()) {
         salt = generateSalt();
         hash = await hashPassword(password.trim(), salt);
+      }
+      if (hash) {
+        markNoteUnlockedInCurrentTab(note.id, hash);
       }
     } else {
       salt = undefined;

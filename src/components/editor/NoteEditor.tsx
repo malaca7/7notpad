@@ -12,6 +12,8 @@ import { EditorToolbar } from './EditorToolbar';
 import { ImageUploadModal } from './ImageUploadModal';
 import { AttachmentManager } from './AttachmentManager';
 import { useEditorSettings } from '../../hooks/useEditorSettings';
+import { isNoteUnlockedInCurrentTab, markNoteUnlockedInCurrentTab } from '../../lib/storage';
+import { verifyPassword } from '../../lib/crypto';
 import { 
   CheckCircle2, 
   Loader2, 
@@ -20,7 +22,9 @@ import {
   Pin, 
   Clock,
   Copy,
-  Check
+  Check,
+  Lock,
+  KeyRound
 } from 'lucide-react';
 
 interface NoteEditorProps {
@@ -42,8 +46,56 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [title, setTitle] = useState(note.title);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [editorPasswordInput, setEditorPasswordInput] = useState('');
+  const [editorPasswordError, setEditorPasswordError] = useState('');
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
+  const [, setUnlockRevision] = useState(0);
   const onUpdateNoteRef = useRef(onUpdateNote);
   onUpdateNoteRef.current = onUpdateNote;
+  const lastLocalHtmlRef = useRef<string>(note.content || '');
+
+  const isPasswordLocked = Boolean(
+    note.share?.is_active &&
+    note.share?.is_password_protected &&
+    note.share?.password_hash &&
+    !isNoteUnlockedInCurrentTab(note.id, note.share.password_hash)
+  );
+
+  // Clear password input & error whenever password hash changes
+  useEffect(() => {
+    setEditorPasswordInput('');
+    setEditorPasswordError('');
+  }, [note.id, note.share?.password_hash, note.share?.is_password_protected]);
+
+  const handleUnlockEditor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editorPasswordInput.trim()) {
+      setEditorPasswordError('Por favor, informe a senha.');
+      return;
+    }
+    if (!note.share?.password_hash || !note.share?.password_salt) return;
+
+    setIsVerifyingPassword(true);
+    setEditorPasswordError('');
+    try {
+      const valid = await verifyPassword(
+        editorPasswordInput,
+        note.share.password_salt,
+        note.share.password_hash
+      );
+      if (valid) {
+        markNoteUnlockedInCurrentTab(note.id, note.share.password_hash);
+        setEditorPasswordInput('');
+        setUnlockRevision((r) => r + 1);
+      } else {
+        setEditorPasswordError('Senha incorreta. Tente novamente.');
+      }
+    } catch {
+      setEditorPasswordError('Erro ao validar a senha.');
+    } finally {
+      setIsVerifyingPassword(false);
+    }
+  };
 
   const getNoteUrl = () => {
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
@@ -92,16 +144,20 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
     },
     onUpdate: ({ editor }) => {
       const html = editor.getHTML();
+      lastLocalHtmlRef.current = html;
       onUpdateNoteRef.current({ content: html });
     },
   }, [note.id]);
 
-  // Keep editor content in sync when active note changes
+  // Keep editor content in sync when active note changes or when remote/cross-tab sync updates note.content
   useEffect(() => {
-    if (editor && editor.getHTML() !== note.content) {
-      editor.commands.setContent(note.content || '');
+    if (!editor) return;
+    const incomingContent = note.content || '';
+    if (incomingContent !== lastLocalHtmlRef.current && editor.getHTML() !== incomingContent) {
+      lastLocalHtmlRef.current = incomingContent;
+      editor.commands.setContent(incomingContent, { emitUpdate: false });
     }
-  }, [note.id, editor]);
+  }, [note.id, note.content, editor]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTitle = e.target.value;
@@ -245,37 +301,83 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       </div>
 
       {/* Formatting Toolbar */}
-      <EditorToolbar
-        editor={editor}
-        onOpenImageModal={() => setIsImageModalOpen(true)}
-        noteTitle={title}
-      />
+      {!isPasswordLocked && (
+        <EditorToolbar
+          editor={editor}
+          onOpenImageModal={() => setIsImageModalOpen(true)}
+          noteTitle={title}
+        />
+      )}
 
-      {/* Editor Content Area */}
-      <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6">
-        <div className={`mx-auto ${maxWidthClass} space-y-6`}>
-          {/* Note Title Input */}
-          <input
-            type="text"
-            value={title}
-            onChange={handleTitleChange}
-            placeholder="Título da nota..."
-            className="w-full bg-transparent text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none border-b border-transparent focus:border-brand-500/30 pb-2 transition-colors"
-          />
-
-          {/* TipTap Document Body */}
-          <div className={`${fontClass} ${fontSizeClass} ${lineSpacingClass} text-gray-800 dark:text-gray-200 min-h-[300px]`}>
-            <EditorContent editor={editor} />
+      {/* Editor Content Area or Password Lock Screen */}
+      {isPasswordLocked ? (
+        <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 flex items-center justify-center">
+          <div className="max-w-md w-full p-8 rounded-3xl bg-gray-50 dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] shadow-2xl">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-brand-500/10 text-brand-400 border border-brand-500/20 flex items-center justify-center mb-5">
+              <Lock className="w-7 h-7" />
+            </div>
+            <h2 className="text-xl font-bold text-center text-gray-900 dark:text-gray-100 mb-2">
+              Bloco de Notas Protegido por Senha
+            </h2>
+            <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-6">
+              A proteção por senha deste bloco de notas está ativa. Insira a senha atual para visualizar e editar.
+            </p>
+            <form onSubmit={handleUnlockEditor} className="space-y-4">
+              <div className="relative">
+                <input
+                  type="password"
+                  value={editorPasswordInput}
+                  onChange={(e) => {
+                    setEditorPasswordInput(e.target.value);
+                    setEditorPasswordError('');
+                  }}
+                  placeholder="Digite a senha do bloco de notas..."
+                  autoFocus
+                  className="w-full bg-white dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] rounded-xl px-4 py-3 pl-10 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50"
+                />
+                <KeyRound className="w-4 h-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              </div>
+              {editorPasswordError && (
+                <p className="text-xs text-rose-500 text-center font-medium">
+                  {editorPasswordError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={isVerifyingPassword}
+                className="w-full py-3 px-4 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold transition-all shadow-lg shadow-brand-600/25 disabled:opacity-50"
+              >
+                {isVerifyingPassword ? 'Verificando...' : 'Desbloquear Bloco de Notas'}
+              </button>
+            </form>
           </div>
-
-          {/* Attachments Section */}
-          <AttachmentManager
-            noteId={note.id}
-            attachments={note.attachments || []}
-            onAttachmentsChange={handleAttachmentsChange}
-          />
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6">
+          <div className={`mx-auto ${maxWidthClass} space-y-6`}>
+            {/* Note Title Input */}
+            <input
+              type="text"
+              value={title}
+              onChange={handleTitleChange}
+              placeholder="Título da nota..."
+              className="w-full bg-transparent text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-600 outline-none border-b border-transparent focus:border-brand-500/30 pb-2 transition-colors"
+            />
+
+            {/* TipTap Document Body */}
+            <div className={`${fontClass} ${fontSizeClass} ${lineSpacingClass} text-gray-800 dark:text-gray-200 min-h-[300px]`}>
+              <EditorContent editor={editor} />
+            </div>
+
+            {/* Attachments Section */}
+            <AttachmentManager
+              noteId={note.id}
+              attachments={note.attachments || []}
+              onAttachmentsChange={handleAttachmentsChange}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Editor Status Bar / Footer */}
       <div className="px-4 sm:px-6 py-2 border-t border-gray-200 dark:border-[#232838] bg-gray-50/70 dark:bg-[#11131a]/70 text-[11px] text-gray-500 dark:text-gray-400 flex items-center justify-between">

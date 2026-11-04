@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { StorageService } from '../../lib/storage';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { StorageService, subscribeToRealtimeSync } from '../../lib/storage';
 import { verifyPassword } from '../../lib/crypto';
 import type { NoteShare, Attachment } from '../../types/note';
 import { useToast } from '../common/Toast';
@@ -17,7 +17,8 @@ import {
   Sparkles,
   Sun,
   Moon,
-  Info
+  Info,
+  Radio
 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 
@@ -49,52 +50,113 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   const [isVerifying, setIsVerifying] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Load note details
-  useEffect(() => {
-    let isMounted = true;
-    const fetchNote = async () => {
+  // Track which password_hash the visitor unlocked so password changes immediately re-lock all views
+  const unlockedPasswordHashRef = useRef<string | null>(null);
+  const unlockedPasswordInputRef = useRef<string>('');
+  const isLockedRef = useRef<boolean>(false);
+  isLockedRef.current = isLocked;
+
+  const syncPublicNoteState = useCallback(async (isInitial = false) => {
+    if (isInitial) {
       setIsLoading(true);
       setNotFound(false);
       setErrorMessage('');
-      try {
-        const result = await StorageService.fetchPublicNote(slug);
-        if (!isMounted) return;
+    }
 
-        if (!result.found || !result.share) {
-          setNotFound(true);
-          setErrorMessage(result.error || '');
-          setIsLoading(false);
-          return;
-        }
+    try {
+      const result = await StorageService.fetchPublicNote(slug);
 
-        setShare(result.share);
-        setTitle(result.note?.title || 'Nota sem título');
-        setCreatedAt(result.note?.created_at || '');
-        setUpdatedAt(result.note?.updated_at || '');
-        setAttachments((result.note as any)?.attachments || []);
+      if (!result.found || !result.share) {
+        setNotFound(true);
+        setErrorMessage(result.error || '');
+        if (isInitial) setIsLoading(false);
+        return;
+      }
 
-        if (result.share.is_password_protected) {
+      // Recover automatically if note was previously deactivated/not found and is now active
+      setNotFound(false);
+      setErrorMessage('');
+      setShare(result.share);
+      setTitle(result.note?.title || 'Nota sem título');
+      setCreatedAt(result.note?.created_at || '');
+      setUpdatedAt(result.note?.updated_at || '');
+      setAttachments((result.note as any)?.attachments || []);
+
+      if (result.share.is_password_protected) {
+        const currentHash = result.share.password_hash || '';
+        const alreadyUnlockedSamePassword =
+          Boolean(unlockedPasswordHashRef.current) &&
+          unlockedPasswordHashRef.current === currentHash;
+
+        if (alreadyUnlockedSamePassword) {
+          // Viewer already unlocked with the current password: keep unlocked & sync content live!
+          setIsLocked(false);
+          const freshContent =
+            result.rawContent ??
+            (await StorageService.unlockProtectedNoteContent(slug, unlockedPasswordInputRef.current)) ??
+            '';
+          setContent(freshContent);
+        } else {
+          // Either initial load, or password was added/changed by owner -> lock immediately!
+          const wasUnlocked = !isInitial && !isLockedRef.current;
+          unlockedPasswordHashRef.current = null;
+          unlockedPasswordInputRef.current = '';
           setIsLocked(true);
           setContent('');
-        } else {
-          setIsLocked(false);
-          setContent(result.note?.content || '');
+          if (wasUnlocked) {
+            setPasswordInput('');
+            setPasswordError('A senha deste bloco de notas foi definida ou alterada. Digite a nova senha para continuar.');
+          }
         }
-      } catch (err: any) {
-        if (isMounted) {
-          setNotFound(true);
-          setErrorMessage(err?.message || '');
-        }
-      } finally {
-        if (isMounted) setIsLoading(false);
+      } else {
+        // Password protection disabled or not active -> unlock automatically across all views!
+        unlockedPasswordHashRef.current = null;
+        unlockedPasswordInputRef.current = '';
+        setIsLocked(false);
+        setPasswordError('');
+        setContent(result.rawContent ?? result.note?.content ?? '');
+      }
+    } catch (err: any) {
+      if (isInitial) {
+        setNotFound(true);
+        setErrorMessage(err?.message || '');
+      }
+    } finally {
+      if (isInitial) setIsLoading(false);
+    }
+  }, [slug]);
+
+  // Initial load + Real-time auto-sync across tabs and browsers
+  useEffect(() => {
+    syncPublicNoteState(true);
+
+    // 1. Instant 0ms sync across tabs in the same browser
+    const unsubRealtime = subscribeToRealtimeSync(() => {
+      syncPublicNoteState(false);
+    });
+
+    // 2. Live cloud polling every 1.8s for visitors across any browser/device
+    const pollInterval = setInterval(() => {
+      syncPublicNoteState(false);
+    }, 1800);
+
+    // 3. Immediate sync on tab focus / visibility change
+    const handleFocus = () => syncPublicNoteState(false);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        syncPublicNoteState(false);
       }
     };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
 
-    fetchNote();
     return () => {
-      isMounted = false;
+      unsubRealtime();
+      clearInterval(pollInterval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [slug]);
+  }, [syncPublicNoteState]);
 
   // Lockout countdown timer
   useEffect(() => {
@@ -130,12 +192,15 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       );
 
       if (isValid) {
-        // Unlock content (with passwordInput passed for AES decryption if portable)
+        // Record the exact password_hash used to unlock so if password changes later, it re-locks automatically
+        unlockedPasswordHashRef.current = share.password_hash;
+        unlockedPasswordInputRef.current = passwordInput;
         const fullContent = await StorageService.unlockProtectedNoteContent(slug, passwordInput);
         setContent(fullContent || '<p>Nota desbloqueada com sucesso.</p>');
         setIsLocked(false);
         setAttempts(0);
-        success('Nota Desbloqueada!', 'Conteúdo protegido liberado para leitura.');
+        setPasswordError('');
+        success('Nota Desbloqueada!', 'Conteúdo protegido liberado para leitura em tempo real.');
       } else {
         const nextAttempts = attempts + 1;
         setAttempts(nextAttempts);
@@ -242,6 +307,10 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
           <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-[#232838]">
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
               Modo Somente Leitura
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
+              <Radio className="w-3 h-3 animate-pulse" />
+              <span>Sincronizado ao vivo</span>
             </span>
           </div>
         </div>

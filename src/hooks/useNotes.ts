@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Note, SaveStatus, NoteShare } from '../types/note';
-import { StorageService, getLocalNotes, saveLocalNotes } from '../lib/storage';
+import { StorageService, getLocalNotes, saveLocalNotes, subscribeToRealtimeSync } from '../lib/storage';
+import { CloudShareService } from '../lib/cloudShare';
 import { getOrCreateOwnerToken } from '../lib/crypto';
 import { AuthService, subscribeToAuth } from '../lib/authService';
 import { useToast } from '../components/common/Toast';
@@ -79,11 +80,87 @@ export function useNotes() {
   useEffect(() => {
     loadNotes();
 
-    const unsub = subscribeToAuth(() => {
+    const unsubAuth = subscribeToAuth(() => {
       loadNotes();
     });
-    return unsub;
+
+    // 1. Instant 0ms sync across tabs/screens in the same browser
+    const unsubRealtime = subscribeToRealtimeSync(() => {
+      if (pendingNoteRef.current) return; // Don't interrupt active local typing
+      const freshLocal = getLocalNotes();
+      setNotes(freshLocal);
+    });
+
+    return () => {
+      unsubAuth();
+      unsubRealtime();
+    };
   }, [loadNotes]);
+
+  // 2. Real-time cloud sync for active note across different browsers/devices
+  useEffect(() => {
+    if (!activeNoteId) return;
+
+    const syncActiveNoteFromCloud = async () => {
+      if (pendingNoteRef.current || saveTimeoutRef.current) return;
+      try {
+        const cloudRes = await CloudShareService.fetchNoteFromCloud(activeNoteId);
+        if (!cloudRes.found || !cloudRes.note) return;
+        if (pendingNoteRef.current || saveTimeoutRef.current) return;
+
+        setNotes((prev) => {
+          const current = prev.find((n) => n.id === activeNoteId);
+          if (!current) return prev;
+
+          const localNoteTime = current.updated_at ? new Date(current.updated_at).getTime() : 0;
+          const localShareTime = current.share?.updated_at ? new Date(current.share.updated_at).getTime() : 0;
+          const localMaxTime = Math.max(localNoteTime, localShareTime);
+
+          const cloudNoteTime = cloudRes.note?.updated_at ? new Date(cloudRes.note.updated_at).getTime() : 0;
+          const cloudShareTime = cloudRes.share?.updated_at ? new Date(cloudRes.share.updated_at).getTime() : 0;
+          const cloudSyncTime = cloudRes.syncUpdatedAt ? new Date(cloudRes.syncUpdatedAt).getTime() : 0;
+          const cloudMaxTime = Math.max(cloudNoteTime, cloudShareTime, cloudSyncTime);
+
+          const remoteContent = cloudRes.rawContent ?? cloudRes.note?.content ?? current.content;
+          const hasDataChanged =
+            cloudRes.note?.title !== current.title ||
+            remoteContent !== current.content ||
+            JSON.stringify(cloudRes.note?.attachments || []) !== JSON.stringify(current.attachments || []) ||
+            JSON.stringify(cloudRes.share || null) !== JSON.stringify(current.share || null);
+
+          if (cloudMaxTime > localMaxTime && hasDataChanged) {
+            const next = prev.map((n) => {
+              if (n.id === activeNoteId) {
+                return {
+                  ...n,
+                  title: cloudRes.note?.title ?? n.title,
+                  content: remoteContent,
+                  updated_at: cloudRes.note?.updated_at || n.updated_at,
+                  attachments: (cloudRes.note?.attachments as any) ?? n.attachments,
+                  share: cloudRes.share ?? n.share,
+                };
+              }
+              return n;
+            });
+            try {
+              localStorage.setItem('7notpad_notes', JSON.stringify(next));
+            } catch {}
+            return next;
+          }
+          return prev;
+        });
+      } catch {}
+    };
+
+    const interval = setInterval(syncActiveNoteFromCloud, 2000);
+    const handleFocus = () => syncActiveNoteFromCloud();
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [activeNoteId]);
 
   // Get active note object
   const activeNote = notes.find((n) => n.id === activeNoteId) || null;

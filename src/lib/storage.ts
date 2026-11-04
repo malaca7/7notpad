@@ -10,6 +10,67 @@ const LOCAL_STORAGE_SHARES_KEY = '7notpad_shares';
 const PORTABLE_CACHE_KEY = '7notpad_portable_cache_';
 const MIGRATED_FLAG_KEY = '7notpad_firebase_migrated';
 
+// Real-time cross-tab BroadcastChannel for 0ms synchronization across open screens/tabs
+const REALTIME_CHANNEL_NAME = '7notpad_realtime_sync';
+let broadcastChannel: BroadcastChannel | null = null;
+try {
+  if (typeof BroadcastChannel !== 'undefined') {
+    broadcastChannel = new BroadcastChannel(REALTIME_CHANNEL_NAME);
+  }
+} catch {}
+
+// Per-tab in-memory record of unlocked password hashes so other tabs/screens lock immediately when a password is set or changed
+const tabUnlockedHashes: Record<string, string> = {};
+
+export function markNoteUnlockedInCurrentTab(noteId: string, passwordHash?: string): void {
+  if (noteId && passwordHash) {
+    tabUnlockedHashes[noteId] = passwordHash;
+  }
+}
+
+export function isNoteUnlockedInCurrentTab(noteId: string, passwordHash?: string): boolean {
+  if (!passwordHash) return true;
+  return tabUnlockedHashes[noteId] === passwordHash;
+}
+
+export function notifyRealtimeSubscribers(payload?: { type: string; noteId?: string; slug?: string }): void {
+  try {
+    broadcastChannel?.postMessage({ ...payload, timestamp: Date.now() });
+  } catch {}
+}
+
+export function subscribeToRealtimeSync(callback: () => void): () => void {
+  const handleChannelMsg = () => callback();
+  const handleStorageEvent = (e: StorageEvent) => {
+    if (
+      !e.key ||
+      e.key === LOCAL_STORAGE_NOTES_KEY ||
+      e.key === LOCAL_STORAGE_SHARES_KEY ||
+      e.key === '7notpad_cloud_object_ids'
+    ) {
+      callback();
+    }
+  };
+
+  let ch: BroadcastChannel | null = null;
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      ch = new BroadcastChannel(REALTIME_CHANNEL_NAME);
+      ch.addEventListener('message', handleChannelMsg);
+    }
+  } catch {}
+
+  window.addEventListener('storage', handleStorageEvent);
+
+  return () => {
+    try {
+      ch?.removeEventListener('message', handleChannelMsg);
+      ch?.close();
+    } catch {}
+    window.removeEventListener('storage', handleStorageEvent);
+  };
+}
+
 // Initial starter note with helpful tips
 const WELCOME_NOTE_HTML = `
 <h2>✨ Bem-vindo ao <strong>7NotPad</strong>!</h2>
@@ -57,6 +118,7 @@ export function getLocalNotes(): Note[] {
 export function saveLocalNotes(notes: Note[]): void {
   try {
     localStorage.setItem(LOCAL_STORAGE_NOTES_KEY, JSON.stringify(notes));
+    notifyRealtimeSubscribers({ type: 'notes_updated' });
   } catch (err) {
     console.error('Error saving local notes:', err);
   }
@@ -74,6 +136,7 @@ export function getLocalShares(): Record<string, NoteShare> {
 export function saveLocalShares(shares: Record<string, NoteShare>): void {
   try {
     localStorage.setItem(LOCAL_STORAGE_SHARES_KEY, JSON.stringify(shares));
+    notifyRealtimeSubscribers({ type: 'shares_updated' });
   } catch (err) {
     console.error('Error saving local shares:', err);
   }
@@ -302,13 +365,14 @@ export const StorageService = {
     found: boolean;
     share?: NoteShare;
     note?: Partial<Note>;
+    rawContent?: string;
     error?: string;
     isCloudConfigured?: boolean;
     isPortable?: boolean;
   }> {
     let cloudError: string | undefined = undefined;
 
-    // 1. Local shares & local notes fast check (same browser, by note.id or custom_slug)
+    // 1. Local shares & local notes check (same browser, by note.id or custom_slug)
     const localShares = getLocalShares();
     const localNotes = getLocalNotes();
     const matchingLocalNote = localNotes.find(
@@ -329,34 +393,88 @@ export const StorageService = {
           }
         : undefined);
 
-    if (localShare && localShare.is_active === false) {
-      return {
-        found: false,
-        error: 'O compartilhamento desta nota foi desativado pelo proprietário.',
-      };
-    }
+    const localTimestamp = Math.max(
+      matchingLocalNote?.updated_at ? new Date(matchingLocalNote.updated_at).getTime() : 0,
+      localShare?.updated_at ? new Date(localShare.updated_at).getTime() : 0
+    );
 
     // 2. Query CloudShareService (works globally in any browser by /notpad/<ID_UNICO>)
     try {
       const cloudRes = await CloudShareService.fetchNoteFromCloud(slug);
       if (cloudRes.found && cloudRes.share) {
-        if (cloudRes.rawContent) {
+        const cloudTimestamp = Math.max(
+          cloudRes.note?.updated_at ? new Date(cloudRes.note.updated_at).getTime() : 0,
+          cloudRes.share?.updated_at ? new Date(cloudRes.share.updated_at).getTime() : 0,
+          cloudRes.syncUpdatedAt ? new Date(cloudRes.syncUpdatedAt).getTime() : 0
+        );
+
+        // If local browser has an even fresher edit (e.g., 0ms local tab edit while cloud PUT is in flight), prefer local
+        if (matchingLocalNote && localShare && localTimestamp > cloudTimestamp) {
+          if (localShare.is_active === false) {
+            return {
+              found: false,
+              error: 'O compartilhamento desta nota foi desativado pelo proprietário.',
+            };
+          }
+          activeCloudProtectedContent = { slug, content: matchingLocalNote.content || '' };
+          return {
+            found: true,
+            isCloudConfigured: true,
+            share: localShare,
+            rawContent: matchingLocalNote.content || '',
+            note: {
+              id: matchingLocalNote.id,
+              title: matchingLocalNote.title,
+              content: localShare.is_password_protected ? '' : matchingLocalNote.content,
+              created_at: matchingLocalNote.created_at,
+              updated_at: matchingLocalNote.updated_at,
+              attachments: matchingLocalNote.attachments,
+            },
+          };
+        }
+
+        if (cloudRes.rawContent !== undefined) {
           activeCloudProtectedContent = { slug, content: cloudRes.rawContent };
         }
         return {
           found: true,
           isCloudConfigured: true,
           share: cloudRes.share,
+          rawContent: cloudRes.rawContent,
           note: cloudRes.note,
         };
       }
       if (cloudRes.error) {
+        // Check if local was just re-activated more recently than cloud deactivation
+        if (matchingLocalNote && localShare && localShare.is_active && localTimestamp > (cloudRes.share?.updated_at ? new Date(cloudRes.share.updated_at).getTime() : 0)) {
+          activeCloudProtectedContent = { slug, content: matchingLocalNote.content || '' };
+          return {
+            found: true,
+            share: localShare,
+            rawContent: matchingLocalNote.content || '',
+            note: {
+              id: matchingLocalNote.id,
+              title: matchingLocalNote.title,
+              content: localShare.is_password_protected ? '' : matchingLocalNote.content,
+              created_at: matchingLocalNote.created_at,
+              updated_at: matchingLocalNote.updated_at,
+              attachments: matchingLocalNote.attachments,
+            },
+          };
+        }
         return {
           found: false,
           error: cloudRes.error,
         };
       }
     } catch {}
+
+    if (localShare && localShare.is_active === false) {
+      return {
+        found: false,
+        error: 'O compartilhamento desta nota foi desativado pelo proprietário.',
+      };
+    }
 
     // 3. Query Firebase Firestore
     try {
@@ -386,9 +504,11 @@ export const StorageService = {
 
     // 4. Local note match fallback (same browser)
     if (localShare && localShare.is_active && matchingLocalNote) {
+      activeCloudProtectedContent = { slug, content: matchingLocalNote.content || '' };
       return {
         found: true,
         share: localShare,
+        rawContent: matchingLocalNote.content || '',
         note: {
           id: matchingLocalNote.id,
           title: matchingLocalNote.title,

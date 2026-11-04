@@ -82,7 +82,7 @@ export function MainLayout() {
     if (!forcePublic) {
       const localNotes = getLocalNotes();
       const ownedNote = localNotes.find((n) => n.id === slug);
-      if (ownedNote && !(ownedNote.share?.is_active && ownedNote.share?.is_password_protected)) {
+      if (ownedNote) {
         return { publicSlug: null as string | null, editorNoteId: ownedNote.id };
       }
     }
