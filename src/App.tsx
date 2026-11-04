@@ -160,7 +160,33 @@ export function MainLayout() {
 
   // If visiting public note link
   if (publicSlug) {
-    return <PublicNoteView slug={publicSlug} onGoHome={handleGoHome} />;
+    return (
+      <>
+        <PublicNoteView
+          slug={publicSlug}
+          onGoHome={handleGoHome}
+          onOpenAuthModal={() => {
+            setAuthModalView('login');
+            setIsAuthModalOpen(true);
+          }}
+        />
+        <AuthModal
+          isOpen={isAuthModalOpen}
+          onClose={() => setIsAuthModalOpen(false)}
+          initialView={authModalView}
+          initialEmail={authEmail}
+          resetToken={resetTokenParam}
+          onSuccess={() => {
+            loadNotes();
+          }}
+          onOpenSettings={(tab) => {
+            if (tab) setSettingsInitialTab(tab);
+            setIsSettingsModalOpen(true);
+          }}
+        />
+        <EmailNotificationToast />
+      </>
+    );
   }
 
   return (

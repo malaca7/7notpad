@@ -1,8 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Underline from '@tiptap/extension-underline';
+import Image from '@tiptap/extension-image';
+import Placeholder from '@tiptap/extension-placeholder';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+
 import { StorageService, subscribeToRealtimeSync, hasDirectNoteAccess } from '../../lib/storage';
-import { subscribeToAuth } from '../../lib/authService';
+import { AuthService, subscribeToAuth } from '../../lib/authService';
 import { verifyPassword } from '../../lib/crypto';
 import type { NoteShare, Attachment } from '../../types/note';
+import { EditorToolbar } from '../editor/EditorToolbar';
+import { ImageUploadModal } from '../editor/ImageUploadModal';
 import { useToast } from '../common/Toast';
 import { 
   Lock, 
@@ -20,28 +30,41 @@ import {
   Moon,
   Info,
   Radio,
-  ShieldCheck
+  ShieldCheck,
+  Edit3,
+  CheckCircle2,
+  Loader2,
+  UserCheck,
+  LogIn
 } from 'lucide-react';
 import { useTheme } from '../../hooks/useTheme';
 
 interface PublicNoteViewProps {
   slug: string;
   onGoHome: () => void;
+  onOpenAuthModal?: () => void;
 }
 
-export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }) => {
+export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, onOpenAuthModal }) => {
   const { theme, toggleTheme } = useTheme();
   const { success, error } = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [noteId, setNoteId] = useState('');
   const [share, setShare] = useState<NoteShare | null>(null);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [createdAt, setCreatedAt] = useState('');
   const [updatedAt, setUpdatedAt] = useState('');
+
+  // Collaborative Editor / Admin state
+  const [canEdit, setCanEdit] = useState(false);
+  const [collabSaveStatus, setCollabSaveStatus] = useState<'saved' | 'saving'>('saved');
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState(() => AuthService.getCurrentUser());
 
   // Password protection state
   const [isLocked, setIsLocked] = useState(false);
@@ -53,17 +76,142 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   const [copied, setCopied] = useState(false);
   const [directAccessBadge, setDirectAccessBadge] = useState<string | null>(null);
 
-  // Track which password_hash the visitor unlocked so password changes immediately re-lock all views
+  // Refs to coordinate real-time polling with local collaborative editing
   const unlockedPasswordHashRef = useRef<string | null>(null);
   const unlockedPasswordInputRef = useRef<string>('');
   const isLockedRef = useRef<boolean>(false);
   isLockedRef.current = isLocked;
+
+  const lastLocalEditTimeRef = useRef<number>(0);
+  const saveTimerRef = useRef<any>(null);
+  const latestTitleRef = useRef<string>(title);
+  const latestContentRef = useRef<string>(content);
+  const latestShareRef = useRef<NoteShare | null>(share);
+  const latestNoteIdRef = useRef<string>(noteId);
+  const latestAttachmentsRef = useRef<Attachment[]>(attachments);
+  const latestCreatedAtRef = useRef<string>(createdAt);
+
+  latestTitleRef.current = title;
+  latestContentRef.current = content;
+  latestShareRef.current = share;
+  latestNoteIdRef.current = noteId;
+  latestAttachmentsRef.current = attachments;
+  latestCreatedAtRef.current = createdAt;
+
+  // Trigger debounced collaborative save when Admin/Editor modifies title or content
+  const scheduleCollaborativeSave = useCallback(
+    (nextTitle: string, nextContent: string) => {
+      const activeShare = latestShareRef.current;
+      if (!activeShare) return;
+
+      lastLocalEditTimeRef.current = Date.now();
+      setCollabSaveStatus('saving');
+
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+      }
+
+      saveTimerRef.current = setTimeout(async () => {
+        saveTimerRef.current = null;
+        try {
+          const res = await StorageService.saveCollaborativeNoteEdit({
+            slug,
+            noteId: latestNoteIdRef.current || activeShare.note_id || slug,
+            title: nextTitle,
+            content: nextContent,
+            share: activeShare,
+            attachments: latestAttachmentsRef.current,
+            createdAt: latestCreatedAtRef.current,
+          });
+          if (res.success) {
+            setUpdatedAt(res.updatedAt);
+          }
+        } catch {}
+        setCollabSaveStatus('saved');
+      }, 350);
+    },
+    [slug]
+  );
+
+  // Tiptap Rich Text Editor instance for Creator / Admin / Editor
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: {
+          levels: [1, 2, 3],
+        },
+      }),
+      Underline,
+      Image.configure({
+        inline: true,
+        allowBase64: true,
+      }),
+      Placeholder.configure({
+        placeholder: 'Digite ou edite o conteúdo deste bloco de notas...',
+      }),
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
+    ],
+    content: content || '',
+    editable: canEdit,
+    editorProps: {
+      attributes: {
+        class: 'focus:outline-none min-h-[280px] leading-relaxed',
+      },
+    },
+    onUpdate: ({ editor }) => {
+      const html = editor.getHTML();
+      latestContentRef.current = html;
+      setContent(html);
+      scheduleCollaborativeSave(latestTitleRef.current, html);
+    },
+  });
+
+  // Keep editor editable state in sync with canEdit
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(canEdit);
+    }
+  }, [editor, canEdit]);
+
+  // Keep Tiptap editor content synced when remote updates arrive (without disrupting active local typing)
+  useEffect(() => {
+    if (!editor) return;
+    const isActivelyTyping =
+      Date.now() - lastLocalEditTimeRef.current < 2500 || Boolean(saveTimerRef.current);
+    if (isActivelyTyping) return;
+
+    const currentHtml = editor.getHTML();
+    if (content !== currentHtml) {
+      editor.commands.setContent(content || '', { emitUpdate: false });
+    }
+  }, [content, editor]);
+
+  const handleTitleEdit = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextTitle = e.target.value;
+    latestTitleRef.current = nextTitle;
+    setTitle(nextTitle);
+    scheduleCollaborativeSave(nextTitle, latestContentRef.current);
+  };
+
+  const handleInsertImage = (url: string) => {
+    if (editor && canEdit) {
+      editor.chain().focus().setImage({ src: url }).run();
+    }
+  };
 
   const syncPublicNoteState = useCallback(async (isInitial = false) => {
     if (isInitial) {
       setIsLoading(true);
       setNotFound(false);
       setErrorMessage('');
+    }
+
+    // Do not overwrite local state while Admin/Editor is actively typing
+    if (!isInitial && (Date.now() - lastLocalEditTimeRef.current < 2500 || saveTimerRef.current)) {
+      return;
     }
 
     try {
@@ -80,7 +228,8 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       setNotFound(false);
       setErrorMessage('');
       setShare(result.share);
-      setTitle(result.note?.title || 'Nota sem título');
+      setNoteId(result.note?.id || result.share.note_id || slug);
+      setTitle(result.note?.title ?? '');
       setCreatedAt(result.note?.created_at || '');
       setUpdatedAt(result.note?.updated_at || '');
       setAttachments((result.note as any)?.attachments || []);
@@ -88,10 +237,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       // Creator/Admin of the note OR authorized @username member NEVER needs to enter a password!
       const directAccess = hasDirectNoteAccess(result.note, result.share);
       if (directAccess.allowed) {
+        const hasAdminEditRole = Boolean(directAccess.isCreator);
+        setCanEdit(hasAdminEditRole);
         setDirectAccessBadge(
-          directAccess.isCreator
-            ? `Criador / Admin${directAccess.matchedUser ? ` (${directAccess.matchedUser})` : ''}`
-            : `Acesso Liberado (${directAccess.matchedUser || 'Membro'})`
+          hasAdminEditRole
+            ? `Admin / Editor${directAccess.matchedUser ? ` (${directAccess.matchedUser})` : ''}`
+            : `Leitor Liberado (${directAccess.matchedUser || 'Membro'})`
         );
         setIsLocked(false);
         setPasswordError('');
@@ -103,6 +254,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
         setContent(fullContent);
         return;
       } else {
+        setCanEdit(false);
         setDirectAccessBadge(null);
       }
 
@@ -158,7 +310,8 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
     const unsubRealtime = subscribeToRealtimeSync(() => {
       syncPublicNoteState(false);
     });
-    const unsubAuth = subscribeToAuth(() => {
+    const unsubAuth = subscribeToAuth((session) => {
+      setCurrentUser(session?.user || null);
       syncPublicNoteState(false);
     });
 
@@ -222,7 +375,6 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
       );
 
       if (isValid) {
-        // Record the exact password_hash used to unlock so if password changes later, it re-locks automatically
         unlockedPasswordHashRef.current = share.password_hash;
         unlockedPasswordInputRef.current = passwordInput;
         const fullContent = await StorageService.unlockProtectedNoteContent(slug, passwordInput);
@@ -236,7 +388,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
         setAttempts(nextAttempts);
 
         if (nextAttempts >= 5) {
-          setLockoutTime(30); // 30s lockout against brute-force attacks
+          setLockoutTime(30);
           setPasswordError('Muitas tentativas incorretas. Aguarde 30 segundos.');
         } else {
           setPasswordError(`Senha incorreta. ${5 - nextAttempts} tentativa(s) restante(s).`);
@@ -251,12 +403,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
 
   const handleCopyContent = async () => {
     try {
-      const tempEl = document.createElement('div');
-      tempEl.innerHTML = content;
-      const plainText = tempEl.textContent || tempEl.innerText || '';
-      await navigator.clipboard.writeText(`${title}\n\n${plainText}`);
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = content;
+      const plainText = tempDiv.textContent || tempDiv.innerText || '';
+      await navigator.clipboard.writeText(plainText);
       setCopied(true);
-      success('Conteúdo copiado!');
+      success('Conteúdo copiado!', 'O texto da nota foi copiado para a área de transferência.');
       setTimeout(() => setCopied(false), 2000);
     } catch {
       error('Erro ao copiar');
@@ -265,10 +417,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 p-4">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-3 border-brand-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">Carregando nota compartilhada...</p>
+          <div className="w-10 h-10 rounded-2xl bg-brand-600/20 border border-brand-500/30 flex items-center justify-center animate-pulse">
+            <Sparkles className="w-5 h-5 text-brand-400" />
+          </div>
+          <p className="text-xs text-gray-500 font-medium">Carregando nota compartilhada...</p>
         </div>
       </div>
     );
@@ -328,33 +482,81 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-gray-100 flex flex-col transition-colors duration-200">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md border-b border-gray-200 dark:border-[#232838] px-4 lg:px-8 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="sticky top-0 z-30 bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md border-b border-gray-200 dark:border-[#232838] px-4 lg:px-8 py-3.5 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={onGoHome}
             className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-xl border border-gray-200 dark:border-[#232838] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-700 dark:text-gray-300 transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Voltar ao 7NotPad</span>
+            <span>Painel 7NotPad</span>
           </button>
+
           <div className="hidden sm:flex items-center gap-2 pl-2 border-l border-gray-200 dark:border-[#232838]">
-            <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
-              Modo Somente Leitura
-            </span>
+            {canEdit ? (
+              <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30">
+                <Edit3 className="w-3 h-3" />
+                <span>Modo Editor / Admin</span>
+              </span>
+            ) : (
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
+                Modo Somente Leitura
+              </span>
+            )}
+
             <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20">
               <Radio className="w-3 h-3 animate-pulse" />
               <span>Sincronizado ao vivo</span>
             </span>
+
             {directAccessBadge && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-400 font-medium border border-purple-500/20">
+              <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 font-medium border border-brand-500/20">
                 <ShieldCheck className="w-3 h-3" />
                 <span>{directAccessBadge}</span>
+              </span>
+            )}
+
+            {canEdit && (
+              <span className="inline-flex items-center gap-1 text-[11px] pl-1">
+                {collabSaveStatus === 'saving' ? (
+                  <span className="flex items-center gap-1 text-brand-400 font-medium animate-pulse">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Salvando...</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>Salvo</span>
+                  </span>
+                )}
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
+          {/* User / Auth status button so Admins/Members can log in directly on this URL */}
+          {currentUser ? (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              title="Sua conta conectada"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono font-semibold"
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              <span>@{currentUser.username}</span>
+            </button>
+          ) : onOpenAuthModal ? (
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30 text-brand-400 text-xs font-semibold transition-colors"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Entrar (@usuario)</span>
+            </button>
+          ) : null}
+
           <button
             onClick={toggleTheme}
             className="p-2 rounded-xl border border-gray-200 dark:border-[#232838] text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#181b24] transition-colors"
@@ -372,14 +574,6 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
               <span>{copied ? 'Copiado!' : 'Copiar Texto'}</span>
             </button>
           )}
-
-          <button
-            onClick={onGoHome}
-            className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-sm transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            Criar Minha Nota
-          </button>
         </div>
       </header>
 
@@ -396,7 +590,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
               Nota Protegida por Senha
             </h2>
             <p className="text-xs text-center text-gray-500 dark:text-gray-400 mb-6">
-              O autor desta nota configurou uma senha de proteção. Insira a senha correta para visualizar o conteúdo.
+              O autor desta nota configurou uma senha de proteção. Insira a senha correta ou entre na sua conta autorizada para acessar.
             </p>
 
             <form onSubmit={handleUnlock} className="space-y-4">
@@ -436,84 +630,141 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome }
               >
                 {isVerifying ? 'Verificando...' : 'Desbloquear Conteúdo'}
               </button>
+
+              {!currentUser && onOpenAuthModal && (
+                <button
+                  type="button"
+                  onClick={onOpenAuthModal}
+                  className="w-full py-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>É Admin ou Membro autorizado? Entrar na Conta</span>
+                </button>
+              )}
             </form>
           </div>
         ) : (
-          /* Unlocked Note Article */
-          <article className="bg-white dark:bg-[#11131a] rounded-3xl border border-gray-200 dark:border-[#232838] p-6 sm:p-12 shadow-xl my-4">
-            {/* Header info */}
-            <div className="border-b border-gray-100 dark:border-[#232838] pb-6 mb-8">
-              <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-gray-100 tracking-tight mb-4">
-                {title || 'Nota sem título'}
-              </h1>
-
-              <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                {createdAt && (
-                  <div className="flex items-center gap-1.5">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>Criada em {new Date(createdAt).toLocaleDateString('pt-BR')}</span>
-                  </div>
-                )}
-                {updatedAt && (
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Atualizada às {new Date(updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                )}
-                <div className="ml-auto text-xs text-brand-400 font-mono">
-                  7notpad.com/notpad/{slug}
-                </div>
-              </div>
-            </div>
-
-            {/* Note Content */}
-            <div 
-              className="tiptap prose prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed min-h-[200px]"
-              dangerouslySetInnerHTML={{ __html: content }}
-            />
-
-            {/* Attachments Section if any */}
-            {attachments && attachments.length > 0 && (
-              <div className="mt-12 pt-6 border-t border-gray-100 dark:border-[#232838]">
-                <h2 className="text-sm font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-3 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-brand-400" />
-                  Anexos ({attachments.length})
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {attachments.map((att) => (
-                    <div
-                      key={att.id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838]"
-                    >
-                      <div className="flex items-center gap-2.5 truncate">
-                        <FileText className="w-4 h-4 text-brand-400 shrink-0" />
-                        <div className="truncate text-xs">
-                          <div className="font-medium text-gray-800 dark:text-gray-200 truncate">{att.file_name}</div>
-                          <div className="text-[10px] text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</div>
-                        </div>
-                      </div>
-                      {att.data_url ? (
-                        <a
-                          href={att.data_url}
-                          download={att.file_name}
-                          className="p-2 text-gray-500 hover:text-brand-400 transition-colors"
-                          title="Baixar arquivo"
-                        >
-                          <Download className="w-4 h-4" />
-                        </a>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
+          /* Unlocked Note Article / Collaborative Editor */
+          <article className="bg-white dark:bg-[#11131a] rounded-3xl border border-gray-200 dark:border-[#232838] shadow-xl my-4 overflow-hidden">
+            {/* Rich Text Toolbar for Creator / Admin / Editor */}
+            {canEdit && (
+              <div className="border-b border-gray-200 dark:border-[#232838] bg-gray-50/60 dark:bg-[#141720]">
+                <EditorToolbar
+                  editor={editor}
+                  noteTitle={title}
+                  onOpenImageModal={() => setIsImageModalOpen(true)}
+                />
               </div>
             )}
+
+            <div className="p-6 sm:p-12">
+              {/* Header info & Title */}
+              <div className="border-b border-gray-100 dark:border-[#232838] pb-6 mb-8">
+                {canEdit ? (
+                  <div className="mb-4">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-purple-400 flex items-center gap-1">
+                        <Edit3 className="w-3 h-3" />
+                        Edição Liberada (Admin / Editor) — Alterações sincronizam ao vivo
+                      </span>
+                    </div>
+                    <input
+                      type="text"
+                      value={title}
+                      onChange={handleTitleEdit}
+                      placeholder="Título da nota..."
+                      className="w-full text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-gray-100 bg-transparent border-b border-transparent focus:border-brand-500/50 pb-1 tracking-tight outline-none placeholder:text-gray-400 dark:placeholder:text-gray-600 transition-colors"
+                    />
+                  </div>
+                ) : (
+                  <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-gray-100 tracking-tight mb-4">
+                    {title || 'Nota sem título'}
+                  </h1>
+                )}
+
+                <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+                  {createdAt && (
+                    <div className="flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span>Criada em {new Date(createdAt).toLocaleDateString('pt-BR')}</span>
+                    </div>
+                  )}
+                  {updatedAt && (
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Atualizada às {new Date(updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  )}
+                  <div className="ml-auto text-xs text-brand-400 font-mono">
+                    /notpad/{slug}
+                  </div>
+                </div>
+              </div>
+
+              {/* Note Content: Interactive Editor for Admin/Editor, Read-Only HTML for Viewer */}
+              {canEdit ? (
+                <div className="tiptap prose prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed min-h-[280px]">
+                  <EditorContent editor={editor} />
+                </div>
+              ) : (
+                <div 
+                  className="tiptap prose prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed min-h-[200px]"
+                  dangerouslySetInnerHTML={{ __html: content }}
+                />
+              )}
+
+              {/* Attachments Section if any */}
+              {attachments && attachments.length > 0 && (
+                <div className="mt-12 pt-6 border-t border-gray-100 dark:border-[#232838]">
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-gray-600 dark:text-gray-400 mb-3 flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-brand-400" />
+                    Anexos ({attachments.length})
+                  </h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {attachments.map((att) => (
+                      <div
+                        key={att.id}
+                        className="flex items-center justify-between p-3 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838]"
+                      >
+                        <div className="flex items-center gap-2.5 truncate">
+                          <FileText className="w-4 h-4 text-brand-400 shrink-0" />
+                          <div className="truncate text-xs">
+                            <div className="font-medium text-gray-800 dark:text-gray-200 truncate">{att.file_name}</div>
+                            <div className="text-[10px] text-gray-400">{(att.file_size / 1024).toFixed(1)} KB</div>
+                          </div>
+                        </div>
+                        {att.data_url ? (
+                          <a
+                            href={att.data_url}
+                            download={att.file_name}
+                            className="p-2 text-gray-500 hover:text-brand-400 transition-colors"
+                            title="Baixar arquivo"
+                          >
+                            <Download className="w-4 h-4" />
+                          </a>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </article>
         )}
       </main>
 
+      {/* Image Upload Modal for Collaborative Editor */}
+      {canEdit && (
+        <ImageUploadModal
+          isOpen={isImageModalOpen}
+          onClose={() => setIsImageModalOpen(false)}
+          onInsertImage={handleInsertImage}
+        />
+      )}
+
       {/* Public Footer */}
       <footer className="text-center py-6 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-200 dark:border-[#232838]">
-        Desenvolvido com <span className="text-brand-400">7NotPad</span> — Bloco de notas rápido e anônimo.
+        Desenvolvido com <span className="text-brand-400">7NotPad</span> — Bloco de notas rápido e colaborativo.
       </footer>
     </div>
   );

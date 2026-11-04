@@ -331,6 +331,76 @@ export const StorageService = {
     return { success: true };
   },
 
+  // Save collaborative edit made by the Creator or an authorized Admin/Editor (@username with role 'admin')
+  async saveCollaborativeNoteEdit(params: {
+    slug: string;
+    noteId: string;
+    title: string;
+    content: string;
+    share: NoteShare;
+    attachments?: Note['attachments'];
+    createdAt?: string;
+  }): Promise<{ success: boolean; updatedAt: string }> {
+    const now = new Date().toISOString();
+    const localNotes = getLocalNotes();
+    const existingLocal = localNotes.find(
+      (n) => n.id === params.noteId || n.id === params.slug || n.share?.custom_slug === params.slug
+    );
+
+    const updatedShare: NoteShare = {
+      ...params.share,
+      updated_at: now,
+    };
+
+    const noteObj: Note = existingLocal
+      ? {
+          ...existingLocal,
+          title: params.title,
+          content: params.content,
+          updated_at: now,
+          share: updatedShare,
+          attachments: params.attachments ?? existingLocal.attachments ?? [],
+        }
+      : {
+          id: params.noteId || params.slug,
+          local_id: params.noteId || params.slug,
+          title: params.title,
+          content: params.content,
+          created_at: params.createdAt || now,
+          updated_at: now,
+          owner_token: params.share.owner_token || getOrCreateOwnerToken(),
+          user_id: params.share.owner_user_id,
+          owner_username: params.share.owner_username,
+          is_pinned: false,
+          attachments: params.attachments || [],
+          share: updatedShare,
+        };
+
+    // 1. Update local storage & local shares so all local tabs update in 0ms
+    const idx = localNotes.findIndex((n) => n.id === noteObj.id);
+    if (idx >= 0) {
+      localNotes[idx] = noteObj;
+    } else {
+      localNotes.unshift(noteObj);
+    }
+    saveLocalNotes(localNotes);
+
+    const localShares = getLocalShares();
+    if (updatedShare.custom_slug) {
+      localShares[updatedShare.custom_slug] = updatedShare;
+    }
+    localShares[noteObj.id] = updatedShare;
+    saveLocalShares(localShares);
+
+    activeCloudProtectedContent = { slug: params.slug, content: params.content };
+
+    // 2. Sync to global CloudShareService & Firebase so all browsers/members see the edit immediately
+    await CloudShareService.syncNoteToCloud(noteObj, updatedShare);
+    FirebaseService.saveNote(noteObj).catch(() => {});
+
+    return { success: true, updatedAt: now };
+  },
+
   // Delete note
   async deleteNote(noteId: string): Promise<boolean> {
     // 1. Remove from local storage immediately

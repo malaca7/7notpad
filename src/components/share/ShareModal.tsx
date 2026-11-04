@@ -479,8 +479,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               onChange={(e) => setNewUserRole(e.target.value as 'admin' | 'viewer')}
               className="bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl px-2.5 py-2 text-xs text-gray-700 dark:text-gray-200 outline-none focus:ring-2 focus:ring-brand-500/50"
             >
-              <option value="admin">Admin / Editor</option>
-              <option value="viewer">Leitor Direto</option>
+              <option value="admin">Admin / Editor (Pode Editar)</option>
+              <option value="viewer">Leitor Direto (Sem Senha)</option>
             </select>
 
             <button
@@ -561,7 +561,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                             : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                         }`}
                       >
-                        {u.role === 'admin' ? 'Admin / Sem Senha' : 'Leitor / Sem Senha'}
+                        {u.role === 'admin' ? 'Admin / Editor (Pode Editar)' : 'Leitor / Sem Senha'}
                       </button>
                       <button
                         type="button"
