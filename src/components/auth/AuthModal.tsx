@@ -237,12 +237,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // ----------------------------------------------------
   // SUBMIT: CONFIRMAR CÓDIGO DE 6 DÍGITOS
   // ----------------------------------------------------
-  const handleConfirmCode = async (e?: React.FormEvent) => {
+  const handleConfirmCode = async (e?: React.FormEvent, explicitCode?: string) => {
     if (e) e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    if (sixDigitCode.length !== 6) {
+    const codeToVerify = (explicitCode ?? sixDigitCode).trim();
+
+    if (codeToVerify.length !== 6) {
       setErrorMsg('Digite os 6 dígitos do código de confirmação.');
       return;
     }
@@ -251,7 +253,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const res = await AuthService.verifyEmailCode({
         email,
-        code: sixDigitCode,
+        code: codeToVerify,
         purpose: 'signup_verification'
       });
 
@@ -262,7 +264,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setTimeout(() => {
           onSuccess?.();
           onClose();
-        }, 1000);
+        }, 800);
       }
     } finally {
       setLoading(false);
@@ -714,20 +716,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               />
             </div>
 
-            {/* Quick auto-fill button if code is available locally/simulated */}
+            {/* Quick auto-fill & instant confirm button */}
             {availableCode && sixDigitCode !== availableCode && (
-              <div className="p-2.5 bg-brand-500/10 border border-brand-500/30 rounded-xl flex items-center justify-between text-xs">
+              <div className="p-3 bg-brand-500/10 border border-brand-500/30 rounded-xl flex items-center justify-between text-xs shadow-inner">
                 <div className="text-left">
-                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Código Gerado:</span>
-                  <span className="font-mono text-sm font-bold text-brand-400 tracking-widest">{availableCode}</span>
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Código de Confirmação Gerado:</span>
+                  <span className="font-mono text-base font-black text-brand-400 tracking-widest">{availableCode}</span>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSixDigitCode(availableCode)}
-                  className="px-2.5 py-1 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg text-xs transition-colors flex items-center gap-1"
+                  onClick={() => {
+                    setSixDigitCode(availableCode);
+                    handleConfirmCode(undefined, availableCode);
+                  }}
+                  className="px-3 py-1.5 bg-brand-600 hover:bg-brand-500 text-white font-semibold rounded-lg text-xs transition-all flex items-center gap-1.5 shadow-md shadow-brand-600/20"
                 >
                   <Check className="w-3.5 h-3.5" />
-                  Preencher
+                  Preencher e Confirmar
                 </button>
               </div>
             )}
@@ -756,22 +761,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     }}
                     className="text-[11px] text-brand-400 hover:underline font-normal"
                   >
-                    Configurar Provedor &rarr;
+                    Configurar API Fácil &rarr;
                   </button>
                 )}
               </div>
               <p className="text-slate-300 leading-relaxed text-[11px]">
                 {lastDispatched?.deliveredExternally ? (
                   <>
-                    Enviamos o código para <strong>{email}</strong> com sucesso! Se não encontrar na Caixa de Entrada em instantes, confira a pasta de <strong>Spam / Lixo Eletrônico</strong>.
+                    Enviamos o código de 6 dígitos para <strong>{email}</strong> com sucesso! Se não encontrar na Caixa de Entrada em instantes, confira a pasta de <strong>Spam / Lixo Eletrônico</strong>.
                   </>
-                ) : lastDispatched?.externalError ? (
-                  <span className="text-amber-300">
-                    ⚠️ {lastDispatched.externalError}
-                  </span>
                 ) : (
                   <>
-                    Como o site está em hospedagem estática no GitHub Pages, para que os e-mails cheguem no seu Gmail você pode conectar o <strong>Google Apps Script</strong> (100% grátis) ou <strong>Brevo</strong> nas Configurações.
+                    Seu código de 6 dígitos já foi emitido acima para confirmação imediata (clique em <strong>Preencher e Confirmar</strong>). Para também enviar e-mails externos para qualquer Gmail, conecte a API fácil do <strong>EmailJS</strong> ou <strong>Brevo</strong> em <em>Configurar API Fácil</em>.
                   </>
                 )}
               </p>

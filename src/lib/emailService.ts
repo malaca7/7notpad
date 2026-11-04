@@ -1,5 +1,6 @@
 import { collection, doc, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
+import { CloudShareService } from './cloudShare';
 import type { DispatchedEmail, VerificationPurpose, EmailProviderConfig } from '../types/auth';
 
 const EMAIL_CONFIG_KEY = '7notpad_email_config';
@@ -60,28 +61,53 @@ export function getEmailConfig(): EmailProviderConfig {
     const raw = localStorage.getItem(EMAIL_CONFIG_KEY);
     if (raw) {
       const parsed: EmailProviderConfig = JSON.parse(raw);
-      if (!parsed.webhookUrl) {
-        parsed.webhookUrl = DEFAULT_APPS_SCRIPT_URL;
-      }
-      // Automatically activate the configured Google Apps Script if previously in default simulated mode
-      if (parsed.provider === 'simulated' && parsed.webhookUrl === DEFAULT_APPS_SCRIPT_URL) {
-        parsed.provider = 'webhook';
+      // Migrate away from the un-authorized default Apps Script URL that caused HTTP 401
+      if (parsed.provider === 'webhook' && (!parsed.webhookUrl || parsed.webhookUrl === DEFAULT_APPS_SCRIPT_URL)) {
+        parsed.provider = 'emailjs';
+        parsed.webhookUrl = '';
+        localStorage.setItem(EMAIL_CONFIG_KEY, JSON.stringify(parsed));
       }
       return parsed;
     }
   } catch {}
   return {
-    provider: 'webhook',
-    webhookUrl: DEFAULT_APPS_SCRIPT_URL
+    provider: 'emailjs'
   };
 }
 
 export function saveEmailConfig(config: EmailProviderConfig) {
   try {
     localStorage.setItem(EMAIL_CONFIG_KEY, JSON.stringify(config));
+    // Also sync to global Cloud storage so all browsers/visitors automatically use this API configuration
+    CloudShareService.syncEmailConfigToCloud(config as Record<string, any>).catch(() => {});
   } catch (err) {
     console.error('Error saving email config:', err);
   }
+}
+
+// Load cloud email config if local browser hasn't configured keys yet
+export async function resolveEffectiveEmailConfig(): Promise<EmailProviderConfig> {
+  const local = getEmailConfig();
+  const hasLocalKeys =
+    (local.provider === 'emailjs' && local.emailjsPublicKey && local.emailjsServiceId && local.emailjsTemplateId) ||
+    (local.provider === 'brevo' && local.brevoApiKey) ||
+    (local.provider === 'resend' && local.resendApiKey) ||
+    (local.provider === 'webhook' && local.webhookUrl && local.webhookUrl !== DEFAULT_APPS_SCRIPT_URL);
+
+  if (hasLocalKeys) {
+    return local;
+  }
+
+  try {
+    const cloudCfg = await CloudShareService.fetchEmailConfigFromCloud();
+    if (cloudCfg && cloudCfg.provider) {
+      const merged = { ...local, ...(cloudCfg as EmailProviderConfig) };
+      localStorage.setItem(EMAIL_CONFIG_KEY, JSON.stringify(merged));
+      return merged;
+    }
+  } catch {}
+
+  return local;
 }
 
 // Generate styled HTML template for emails
@@ -156,14 +182,105 @@ export const EmailService = {
     resetLink?: string;
     fullName?: string;
   }): Promise<{ success: boolean; error?: string }> {
-    const config = getEmailConfig();
+    const config = await resolveEffectiveEmailConfig();
     const { to, subject, code, resetLink, fullName } = params;
     const html = buildHtmlEmail(params);
     const plainText = code 
       ? `Seu código de confirmação no 7NotPad é: ${code}. Validade de 10 minutos.`
       : `Link de redefinição de senha: ${resetLink}`;
 
-    // 1. Resend API
+    // 1. EmailJS API (Recommended - Easiest Frontend Email API, connects Gmail in 1 click)
+    if (config.provider === 'emailjs') {
+      if (!config.emailjsPublicKey?.trim() || !config.emailjsServiceId?.trim() || !config.emailjsTemplateId?.trim()) {
+        return {
+          success: false,
+          error: 'Nenhum provedor externo configurado (preencha Public Key, Service ID e Template ID do EmailJS).'
+        };
+      }
+      try {
+        const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            service_id: config.emailjsServiceId.trim(),
+            template_id: config.emailjsTemplateId.trim(),
+            user_id: config.emailjsPublicKey.trim(),
+            template_params: {
+              to_email: to.trim(),
+              to: to.trim(),
+              email: to.trim(),
+              user_email: to.trim(),
+              recipient: to.trim(),
+              to_name: fullName || to.split('@')[0],
+              full_name: fullName || to.split('@')[0],
+              user_name: fullName || to.split('@')[0],
+              subject,
+              code: code || '',
+              passcode: code || '',
+              verification_code: code || '',
+              otp: code || '',
+              reset_link: resetLink || '',
+              message: plainText,
+              html_content: html
+            }
+          })
+        });
+
+        if (res.ok) {
+          return { success: true };
+        } else {
+          const errText = await res.text().catch(() => '');
+          return {
+            success: false,
+            error: `Erro EmailJS (${res.status}): ${errText || 'Verifique Public Key, Service ID e Template ID.'}`
+          };
+        }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Falha de conexão com a API do EmailJS.' };
+      }
+    }
+
+    // 2. Brevo API (Only 1 API Key needed - sends full HTML directly via CORS)
+    if (config.provider === 'brevo') {
+      if (!config.brevoApiKey?.trim()) {
+        return {
+          success: false,
+          error: 'Nenhum provedor externo configurado (informe a Chave API xkeysib-... do Brevo).'
+        };
+      }
+      try {
+        const senderEmail = config.brevoSenderEmail?.trim() || 'malacarogeriojr@gmail.com';
+        const senderName = config.brevoSenderName?.trim() || '7NotPad';
+
+        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': config.brevoApiKey.trim()
+          },
+          body: JSON.stringify({
+            sender: { name: senderName, email: senderEmail },
+            to: [{ email: to.trim(), name: fullName || to.split('@')[0] }],
+            subject,
+            htmlContent: html,
+            textContent: plainText
+          })
+        });
+
+        if (res.ok) {
+          return { success: true };
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          return { success: false, error: errData?.message || `Erro Brevo HTTP ${res.status}` };
+        }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Falha de conexão com Brevo.' };
+      }
+    }
+
+    // 3. Resend API
     if (config.provider === 'resend' && config.resendApiKey) {
       try {
         const res = await fetch('https://api.resend.com/emails', {
@@ -192,40 +309,8 @@ export const EmailService = {
       }
     }
 
-    // 2. Brevo API
-    if (config.provider === 'brevo' && config.brevoApiKey) {
-      try {
-        const senderEmail = config.brevoSenderEmail?.trim() || 'no-reply@7notpad.com';
-        const senderName = config.brevoSenderName?.trim() || '7NotPad';
-
-        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'api-key': config.brevoApiKey.trim()
-          },
-          body: JSON.stringify({
-            sender: { name: senderName, email: senderEmail },
-            to: [{ email: to.trim() }],
-            subject,
-            htmlContent: html,
-            textContent: plainText
-          })
-        });
-
-        if (res.ok) {
-          return { success: true };
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          return { success: false, error: errData?.message || `Erro Brevo HTTP ${res.status}` };
-        }
-      } catch (err: any) {
-        return { success: false, error: err?.message || 'Falha de conexão com Brevo.' };
-      }
-    }
-
-    // 3. Custom Webhook / Google Apps Script (100% Free via Gmail)
-    if (config.provider === 'webhook' && config.webhookUrl) {
+    // 4. Custom Webhook / Google Apps Script
+    if (config.provider === 'webhook' && config.webhookUrl && config.webhookUrl !== DEFAULT_APPS_SCRIPT_URL) {
       try {
         const url = config.webhookUrl.trim();
         const isGoogleScript = url.includes('script.google.com');
@@ -241,40 +326,24 @@ export const EmailService = {
         const payloadStr = JSON.stringify(payloadObj);
 
         if (isGoogleScript) {
-          try {
-            // Try standard CORS request with text/plain (supported natively by Google Apps Script when 'Who has access' = 'Anyone')
-            const res = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-              body: payloadStr,
-              redirect: 'follow'
-            });
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: payloadStr,
+            redirect: 'follow'
+          });
 
-            if (res.ok) {
-              const data = await res.json().catch(() => ({ success: true }));
-              if (data && data.success === false) {
-                return {
-                  success: false,
-                  error: `Erro no script do Google: ${data.error || 'Autorize o MailApp clicando em Executar no Google Apps Script.'}`
-                };
-              }
-              return { success: true };
-            } else {
-              return {
-                success: false,
-                error: `Google Apps Script retornou status ${res.status} (Acesso restrito). Mude "Quem pode acessar" para "Qualquer pessoa" e crie uma "Nova versão".`
-              };
+          if (res.ok && !res.url.includes('accounts.google.com')) {
+            const data = await res.json().catch(() => ({ success: true }));
+            if (data && data.success === false) {
+              return { success: false, error: data.error || 'Erro no Google Apps Script.' };
             }
-          } catch {
-            // Also try GET query fallback with no-cors in case doGet is active
-            const getUrl = `${url}?to=${encodeURIComponent(to.trim())}&subject=${encodeURIComponent(subject)}&code=${encodeURIComponent(code || '')}`;
-            fetch(getUrl, { method: 'GET', mode: 'no-cors' }).catch(() => {});
-
-            return {
-              success: false,
-              error: 'O Google Apps Script bloqueou o envio externo (Erro 401: Permissão "Somente eu" ou falta de autorização). No Google Apps Script: 1) Salve o código e clique em "▷ Executar" para autorizar o Gmail; 2) Em Implantar > Gerenciar implantações > Editar (lápis), selecione Versão: "Nova versão" e Quem pode acessar: "Qualquer pessoa".'
-            };
+            return { success: true };
           }
+          return {
+            success: false,
+            error: 'Google Apps Script requer permissão "Qualquer pessoa". Recomendamos usar EmailJS ou Brevo.'
+          };
         } else {
           const res = await fetch(url, {
             method: 'POST',

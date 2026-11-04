@@ -69,9 +69,9 @@ export const EmailNotificationToast: React.FC = () => {
             {email.deliveredExternally ? (
               <div className="mb-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[11px] flex items-center gap-1.5 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                <span>Enviado via servidor de e-mail. Verifique sua Caixa de Entrada/Spam.</span>
+                <span>Enviado via API de e-mail. Verifique sua Caixa de Entrada ou Spam.</span>
               </div>
-            ) : email.externalError ? (
+            ) : email.id.startsWith('test_') && email.externalError ? (
               <div className="mb-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] leading-relaxed flex items-start gap-1.5">
                 <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
                 <span>{email.externalError}</span>

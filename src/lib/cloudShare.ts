@@ -402,4 +402,73 @@ export const CloudShareService = {
       return fallback;
     }
   },
+
+  /**
+   * Sync global email provider configuration to the cloud so all browsers/visitors can send verification emails
+   */
+  async syncEmailConfigToCloud(config: Record<string, any>): Promise<void> {
+    try {
+      const cfgKey = '7notpad_email_config_v1';
+      let objectId = await lookupCloudObjectIdFromKV(cfgKey);
+
+      if (objectId) {
+        const putRes = await withTimeout(
+          fetch(`${OBJECTS_API_URL}/${objectId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: cfgKey,
+              data: { config, updated_at: new Date().toISOString() },
+            }),
+          })
+        );
+        if (!putRes.ok) objectId = '';
+      }
+
+      if (!objectId) {
+        const postRes = await withTimeout(
+          fetch(OBJECTS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: cfgKey,
+              data: { config, updated_at: new Date().toISOString() },
+            }),
+          })
+        );
+        if (postRes.ok) {
+          const postData = await postRes.json();
+          objectId = postData?.id || '';
+          if (objectId) {
+            await withTimeout(
+              fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${cfgKey}/${objectId}`, {
+                method: 'POST',
+              })
+            );
+          }
+        }
+      }
+    } catch {}
+  },
+
+  /**
+   * Fetch global email provider configuration from the cloud
+   */
+  async fetchEmailConfigFromCloud(): Promise<Record<string, any> | null> {
+    try {
+      const cfgKey = '7notpad_email_config_v1';
+      const objectId = await lookupCloudObjectIdFromKV(cfgKey);
+      if (!objectId) return null;
+
+      const res = await withTimeout(fetch(`${OBJECTS_API_URL}/${objectId}`, { cache: 'no-store' }));
+      if (!res.ok) return null;
+      const json = await res.json();
+      if (json?.data?.config && typeof json.data.config === 'object') {
+        return json.data.config;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
 };

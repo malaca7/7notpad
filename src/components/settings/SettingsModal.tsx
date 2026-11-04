@@ -6,7 +6,7 @@ import { getOrCreateOwnerToken } from '../../lib/crypto';
 import { exportNotesToJson, importNotesFromJson } from '../../lib/exportImport';
 import { StorageService } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
-import { EmailService, getEmailConfig, saveEmailConfig, DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID, DEFAULT_APPS_SCRIPT_URL } from '../../lib/emailService';
+import { EmailService, getEmailConfig, saveEmailConfig, resolveEffectiveEmailConfig, DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID, DEFAULT_APPS_SCRIPT_URL } from '../../lib/emailService';
 import type { EmailProviderConfig } from '../../types/auth';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../common/Toast';
@@ -101,6 +101,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
+    }
+    if (isOpen) {
+      resolveEffectiveEmailConfig().then(cfg => setEmailConfig(cfg)).catch(() => {});
     }
   }, [initialTab, isOpen]);
 
@@ -785,32 +788,32 @@ function processarEnvio(e) {
             {/* Provider Selector Cards */}
             <div className="space-y-2.5">
               <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                Selecione o Provedor de Envio
+                Selecione a API de Envio (Sincronizada em Todos os Navegadores)
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* 1. Google Apps Script */}
+                {/* 1. EmailJS (Easiest API) */}
                 <button
                   type="button"
-                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'webhook' }))}
+                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'emailjs' }))}
                   className={`p-3.5 rounded-xl border text-left transition-all relative ${
-                    emailConfig.provider === 'webhook'
+                    emailConfig.provider === 'emailjs'
                       ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
                       : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Google Apps Script</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">100% Grátis</span>
+                      <span>EmailJS API</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">Mais Fácil • 1 Clique</span>
                     </span>
-                    {emailConfig.provider === 'webhook' && <Check className="w-4 h-4 text-brand-400" />}
+                    {emailConfig.provider === 'emailjs' && <Check className="w-4 h-4 text-brand-400" />}
                   </div>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Envia diretamente pelo seu Gmail sem cartão, sem limites diários restritivos e sem cair no spam.
+                    Feito para sites estáticos (GitHub Pages). Conecta seu Gmail em 1 clique sem scripts ou bloqueios de CORS.
                   </p>
                 </button>
 
-                {/* 2. Brevo */}
+                {/* 2. Brevo (Only 1 API Key) */}
                 <button
                   type="button"
                   onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'brevo' }))}
@@ -822,39 +825,17 @@ function processarEnvio(e) {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Brevo (Sendinblue)</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-400 font-bold">300/dia Grátis</span>
+                      <span>Brevo REST API</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-400 font-bold">Só 1 Chave • 300/dia</span>
                     </span>
                     {emailConfig.provider === 'brevo' && <Check className="w-4 h-4 text-brand-400" />}
                   </div>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    API REST com suporte nativo a chamadas via CORS direto pelo navegador.
+                    Usa apenas 1 chave API (xkeysib-...) e envia o e-mail HTML completo direto pelo navegador.
                   </p>
                 </button>
 
-                {/* 3. Resend */}
-                <button
-                  type="button"
-                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'resend' }))}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
-                    emailConfig.provider === 'resend'
-                      ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
-                      : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Resend API</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-bold">3.000/mês</span>
-                    </span>
-                    {emailConfig.provider === 'resend' && <Check className="w-4 h-4 text-brand-400" />}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Serviço moderno para desenvolvedores (requer chave API re_...).
-                  </p>
-                </button>
-
-                {/* 4. Modo Simulado / Em Tela */}
+                {/* 3. Modo Instantâneo / Em Tela */}
                 <button
                   type="button"
                   onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'simulated' }))}
@@ -866,13 +847,35 @@ function processarEnvio(e) {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Modo Simulado / Tela</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-bold">Instantâneo</span>
+                      <span>Código Instantâneo em Tela</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-bold">Zero Configuração</span>
                     </span>
                     {emailConfig.provider === 'simulated' && <Check className="w-4 h-4 text-brand-400" />}
                   </div>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Exibe o código de 6 dígitos diretamente na notificação da tela para testes rápidos sem depender de e-mail.
+                    Gera o código de 6 dígitos na hora com botão "Preencher e Confirmar" em 1 clique.
+                  </p>
+                </button>
+
+                {/* 4. Webhook / Outros */}
+                <button
+                  type="button"
+                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'webhook' }))}
+                  className={`p-3.5 rounded-xl border text-left transition-all ${
+                    emailConfig.provider === 'webhook'
+                      ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
+                      : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                      <span>Webhook / Apps Script</span>
+                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-bold">Avançado</span>
+                    </span>
+                    {emailConfig.provider === 'webhook' && <Check className="w-4 h-4 text-brand-400" />}
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
+                    Integre qualquer endpoint HTTP POST próprio, Make, n8n ou Google Apps Script.
                   </p>
                 </button>
               </div>
@@ -880,6 +883,73 @@ function processarEnvio(e) {
 
             {/* Config Fields depending on Provider */}
             <form onSubmit={handleSaveEmailConfig} className="p-4 rounded-2xl bg-white dark:bg-[#0f1118] border border-gray-200 dark:border-[#232838] space-y-4">
+              {emailConfig.provider === 'emailjs' && (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4" />
+                        Como pegar os 3 dados grátis no EmailJS (leva 1 minuto):
+                      </span>
+                      <a
+                        href="https://dashboard.emailjs.com/admin"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] text-brand-400 hover:underline flex items-center gap-1 font-semibold"
+                      >
+                        Abrir Painel EmailJS <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                    <ol className="list-decimal list-inside text-[11px] text-gray-600 dark:text-gray-300 space-y-1">
+                      <li>Crie conta grátis em <strong>emailjs.com</strong> e em <strong>Email Services</strong> clique em <em>Add New Service &rarr; Gmail</em> (copie o <strong>Service ID</strong>).</li>
+                      <li>Em <strong>Email Templates</strong>, crie um template colocando <code>{`{{to_email}}`}</code> no campo <em>To Email</em> e <code>{`{{code}}`}</code> no texto do e-mail (copie o <strong>Template ID</strong>).</li>
+                      <li>Em <strong>Account &rarr; General</strong>, copie a sua <strong>Public Key</strong> e cole abaixo:</li>
+                    </ol>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                        Public Key (Account)
+                      </label>
+                      <input
+                        type="text"
+                        value={emailConfig.emailjsPublicKey || ''}
+                        onChange={e => setEmailConfig(prev => ({ ...prev, emailjsPublicKey: e.target.value }))}
+                        placeholder="ex: aBcDeFgHiJkLmNoPq"
+                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                        Service ID
+                      </label>
+                      <input
+                        type="text"
+                        value={emailConfig.emailjsServiceId || ''}
+                        onChange={e => setEmailConfig(prev => ({ ...prev, emailjsServiceId: e.target.value }))}
+                        placeholder="ex: service_xxxxxxx"
+                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                        Template ID
+                      </label>
+                      <input
+                        type="text"
+                        value={emailConfig.emailjsTemplateId || ''}
+                        onChange={e => setEmailConfig(prev => ({ ...prev, emailjsTemplateId: e.target.value }))}
+                        placeholder="ex: template_xxxxxxx"
+                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {emailConfig.provider === 'webhook' && (
                 <div className="space-y-3">
                   <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-1 text-xs">
