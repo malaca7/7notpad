@@ -4,6 +4,7 @@ import { FirebaseService } from './firebase';
 import { CloudShareService } from './cloudShare';
 import { parsePortablePayload, decryptContent, type PortableNoteData } from './portableShare';
 import { AuthService } from './authService';
+import { isUserAdmin } from '../types/auth';
 
 const LOCAL_STORAGE_NOTES_KEY = '7notpad_notes';
 const LOCAL_STORAGE_SHARES_KEY = '7notpad_shares';
@@ -40,7 +41,13 @@ export function isNoteUnlockedInCurrentTab(noteId: string, passwordHash?: string
 export function hasDirectNoteAccess(
   note?: Partial<Note> | null,
   share?: NoteShare | null
-): { allowed: boolean; isCreator: boolean; matchedUser?: string } {
+): {
+  allowed: boolean;
+  isCreator: boolean;
+  canEdit: boolean;
+  role: 'creator' | 'admin' | 'editor' | 'viewer';
+  matchedUser?: string;
+} {
   const currentOwnerToken = getOrCreateOwnerToken();
   const currentUser = AuthService.getCurrentUser();
 
@@ -49,7 +56,7 @@ export function hasDirectNoteAccess(
     (note?.owner_token && note.owner_token === currentOwnerToken) ||
     (share?.owner_token && share.owner_token === currentOwnerToken)
   ) {
-    return { allowed: true, isCreator: true };
+    return { allowed: true, isCreator: true, canEdit: true, role: 'creator' };
   }
 
   // 2. Check if note exists in this browser's local notes as owned by this browser
@@ -61,40 +68,57 @@ export function hasDirectNoteAccess(
         const localNotes: Note[] = JSON.parse(raw);
         const found = localNotes.find((n) => n.id === noteId || n.share?.custom_slug === share?.custom_slug);
         if (found && (!found.owner_token || found.owner_token === currentOwnerToken)) {
-          return { allowed: true, isCreator: true };
+          return { allowed: true, isCreator: true, canEdit: true, role: 'creator' };
         }
       }
     } catch {}
   }
 
-  // 3. Check logged-in user match (creator by user_id or owner_username, or authorized @username in allowed_users)
+  // 3. Check logged-in user match
   if (currentUser) {
     const myUsername = currentUser.username.trim().toLowerCase().replace(/^@+/, '');
 
+    // 3a. Platform Admin (@malaca, etc.) has full editing privileges
+    if (isUserAdmin(currentUser)) {
+      return {
+        allowed: true,
+        isCreator: true,
+        canEdit: true,
+        role: 'admin',
+        matchedUser: `@${myUsername} (Admin Global)`,
+      };
+    }
+
+    // 3b. Note creator by user_id or owner_username
     if (
       (note?.user_id && note.user_id === currentUser.id) ||
       (share?.owner_user_id && share.owner_user_id === currentUser.id) ||
       (note?.owner_username && note.owner_username.toLowerCase() === myUsername) ||
       (share?.owner_username && share.owner_username.toLowerCase() === myUsername)
     ) {
-      return { allowed: true, isCreator: true, matchedUser: `@${myUsername}` };
+      return { allowed: true, isCreator: true, canEdit: true, role: 'creator', matchedUser: `@${myUsername}` };
     }
 
-    if (Array.isArray(share?.allowed_users)) {
-      const match = share.allowed_users.find(
+    // 3c. Authorized user match in share.allowed_users or note.share.allowed_users
+    const allowedList = share?.allowed_users || note?.share?.allowed_users || [];
+    if (Array.isArray(allowedList)) {
+      const match = allowedList.find(
         (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUsername
       );
       if (match) {
+        const isEditorOrAdmin = match.role === 'admin' || (match as any).role === 'editor';
         return {
           allowed: true,
-          isCreator: match.role === 'admin',
+          isCreator: false,
+          canEdit: isEditorOrAdmin,
+          role: match.role === 'admin' ? 'admin' : (match as any).role === 'editor' ? 'editor' : 'viewer',
           matchedUser: `@${myUsername}`,
         };
       }
     }
   }
 
-  return { allowed: false, isCreator: false };
+  return { allowed: false, isCreator: false, canEdit: false, role: 'viewer' };
 }
 
 export function notifyRealtimeSubscribers(payload?: { type: string; noteId?: string; slug?: string }): void {
@@ -217,7 +241,9 @@ export const StorageService = {
   // Fetch all notes for current owner or user
   async fetchNotes(userId?: string): Promise<Note[]> {
     const ownerToken = getOrCreateOwnerToken();
-    const currentUserId = userId || AuthService.getCurrentUser()?.id;
+    const currentUser = AuthService.getCurrentUser();
+    const currentUserId = userId || currentUser?.id;
+    const currentUsername = currentUser?.username;
     const initialLocalNotes = getLocalNotes();
 
     try {
@@ -230,7 +256,7 @@ export const StorageService = {
       }
 
       // 2. Fetch fresh notes from Firebase (protected by timeout in FirebaseService)
-      const remoteNotes = await FirebaseService.fetchNotes(ownerToken, currentUserId);
+      const remoteNotes = await FirebaseService.fetchNotes(ownerToken, currentUserId, currentUsername);
 
       // Always read the latest local notes AFTER the async call so we never overwrite notes created/edited while loading!
       const freshLocalNotes = getLocalNotes();
@@ -397,6 +423,8 @@ export const StorageService = {
     // 2. Sync to global CloudShareService & Firebase so all browsers/members see the edit immediately
     await CloudShareService.syncNoteToCloud(noteObj, updatedShare);
     FirebaseService.saveNote(noteObj).catch(() => {});
+    FirebaseService.saveShare(updatedShare, noteObj).catch(() => {});
+    notifyRealtimeSubscribers({ type: 'note_updated', noteId: noteObj.id, slug: params.slug });
 
     return { success: true, updatedAt: now };
   },
@@ -449,8 +477,10 @@ export const StorageService = {
       if (!res.success && res.error?.includes('já está em uso')) {
         return res;
       }
+      FirebaseService.saveNote(note).catch(() => {});
     }
 
+    notifyRealtimeSubscribers({ type: 'share_updated', noteId: share.note_id, slug: share.custom_slug });
     return { success: true };
   },
 

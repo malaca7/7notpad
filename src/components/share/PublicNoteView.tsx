@@ -101,8 +101,15 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
   // Trigger debounced collaborative save when Admin/Editor modifies title or content
   const scheduleCollaborativeSave = useCallback(
     (nextTitle: string, nextContent: string) => {
-      const activeShare = latestShareRef.current;
-      if (!activeShare) return;
+      const activeShare = latestShareRef.current || {
+        id: slug,
+        note_id: latestNoteIdRef.current || slug,
+        custom_slug: slug,
+        is_password_protected: false,
+        is_active: true,
+        created_at: latestCreatedAtRef.current || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
       lastLocalEditTimeRef.current = Date.now();
       setCollabSaveStatus('saving');
@@ -237,12 +244,17 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
       // Creator/Admin of the note OR authorized @username member NEVER needs to enter a password!
       const directAccess = hasDirectNoteAccess(result.note, result.share);
       if (directAccess.allowed) {
-        const hasAdminEditRole = Boolean(directAccess.isCreator);
+        const hasAdminEditRole = Boolean(directAccess.canEdit || directAccess.isCreator);
         setCanEdit(hasAdminEditRole);
+        const roleLabel = directAccess.isCreator
+          ? 'Criador'
+          : directAccess.role === 'admin'
+          ? 'Admin'
+          : directAccess.role === 'editor'
+          ? 'Editor'
+          : 'Leitor Liberado';
         setDirectAccessBadge(
-          hasAdminEditRole
-            ? `Admin / Editor${directAccess.matchedUser ? ` (${directAccess.matchedUser})` : ''}`
-            : `Leitor Liberado (${directAccess.matchedUser || 'Membro'})`
+          `${roleLabel}${directAccess.matchedUser ? ` (${directAccess.matchedUser})` : ''}`
         );
         setIsLocked(false);
         setPasswordError('');
@@ -450,12 +462,12 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
           <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/20 text-left text-xs text-gray-300 space-y-2">
             <div className="font-semibold text-brand-400 flex items-center gap-1.5">
               <Info className="w-4 h-4 shrink-0" />
-              {isDeactivated ? 'Status do Compartilhamento' : 'Como sincronizar esta nota?'}
+              {isDeactivated ? 'Status do Compartilhamento' : 'Como acessar esta nota?'}
             </div>
             <p className="leading-relaxed opacity-90">
               {isDeactivated 
-                ? 'O proprietário da nota desativou o link público nas opções de compartilhamento.'
-                : 'Se você criou esta nota, basta abrir o painel principal do 7NotPad ou clicar em Salvar Alterações em Compartilhar para sincronizá-la instantaneamente com a nuvem.'}
+                ? 'O proprietário da nota desativou o link nas opções de compartilhamento.'
+                : 'Se esta nota foi compartilhada com você (@usuario), certifique-se de estar conectado com sua conta. Caso o proprietário tenha acabado de salvar, clique no botão abaixo para tentar recarregar.'}
             </p>
           </div>
 

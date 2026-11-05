@@ -12,7 +12,7 @@ export interface Attachment {
 export interface SharedUserAccess {
   username: string; // lowercase without @
   full_name?: string;
-  role: 'viewer' | 'admin';
+  role: 'viewer' | 'admin' | 'editor';
   added_at: string;
 }
 

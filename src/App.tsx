@@ -121,7 +121,7 @@ export function MainLayout() {
 
     if (!forcePublic) {
       const localNotes = getLocalNotes();
-      const ownedNote = localNotes.find((n) => n.id === slug);
+      const ownedNote = localNotes.find((n) => n.id === slug || n.share?.custom_slug === slug);
       if (ownedNote) {
         return { publicSlug: null as string | null, editorNoteId: ownedNote.id };
       }

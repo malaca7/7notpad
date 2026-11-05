@@ -144,7 +144,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   // Add platform user (@username) to allowedUsers
-  const handleAddPlatformUser = (rawUsername?: string, fullName?: string) => {
+  const handleAddPlatformUser = async (rawUsername?: string, fullName?: string) => {
     const target = (rawUsername ?? userSearchInput).trim().toLowerCase().replace(/^@+/, '');
     if (!target || target.length < 2) {
       error('Usuário inválido', 'Digite um @usuario válido (ex: @malaca).');
@@ -164,22 +164,26 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       added_at: new Date().toISOString(),
     };
 
-    setAllowedUsers((prev) => [...prev, entry]);
+    const nextUsers = [...allowedUsers, entry];
+    setAllowedUsers(nextUsers);
     setUserSearchInput('');
+    await executeSave(false, nextUsers);
   };
 
-  const handleRemovePlatformUser = (username: string) => {
-    setAllowedUsers((prev) => prev.filter((u) => u.username.toLowerCase() !== username.toLowerCase()));
+  const handleRemovePlatformUser = async (username: string) => {
+    const nextUsers = allowedUsers.filter((u) => u.username.toLowerCase() !== username.toLowerCase());
+    setAllowedUsers(nextUsers);
+    await executeSave(false, nextUsers);
   };
 
-  const handleToggleUserRole = (username: string) => {
-    setAllowedUsers((prev) =>
-      prev.map((u) =>
-        u.username.toLowerCase() === username.toLowerCase()
-          ? { ...u, role: u.role === 'admin' ? 'viewer' : 'admin' }
-          : u
-      )
+  const handleToggleUserRole = async (username: string) => {
+    const nextUsers = allowedUsers.map((u) =>
+      u.username.toLowerCase() === username.toLowerCase()
+        ? { ...u, role: (u.role === 'admin' ? 'viewer' : 'admin') as 'admin' | 'viewer' }
+        : u
     );
+    setAllowedUsers(nextUsers);
+    await executeSave(false, nextUsers);
   };
 
   // Filtered platform user suggestions

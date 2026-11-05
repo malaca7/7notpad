@@ -39,6 +39,7 @@ export interface StoredUser {
   full_name: string;
   username: string; // unique lowercase
   email: string;
+  avatar_url?: string;
   role?: UserRole; // 'admin' | 'user'
   birth_date?: string; // YYYY-MM-DD
   security_question?: string;
@@ -733,6 +734,7 @@ export const AuthService = {
         full_name: user.full_name,
         username: user.username,
         email: user.email,
+        avatar_url: user.avatar_url,
         role,
         birth_date: user.birth_date,
         security_question: user.security_question,
@@ -1208,19 +1210,13 @@ export const AuthService = {
   async updateProfile(params: {
     userId: string;
     fullName: string;
-    username: string;
+    avatarUrl?: string | null;
   }): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
-    const { userId } = params;
+    const { userId, avatarUrl } = params;
     const fullName = params.fullName.trim();
-    const username = params.username.trim().toLowerCase();
 
     if (!fullName) {
       return { success: false, error: 'O nome completo não pode ficar em branco.' };
-    }
-
-    const check = isValidUsername(username);
-    if (!check.valid) {
-      return { success: false, error: check.error };
     }
 
     try {
@@ -1230,44 +1226,64 @@ export const AuthService = {
         return { success: false, error: 'Usuário não encontrado.' };
       }
 
-      // Check username uniqueness if changed
-      if (user.username !== username) {
-        if (localUsers.some(u => u.id !== userId && u.username === username)) {
-          return { success: false, error: 'Este nome de usuário já está em uso por outra conta.' };
-        }
-      }
-
       const nowIso = new Date().toISOString();
       user.full_name = fullName;
-      user.username = username;
+      if (avatarUrl !== undefined) {
+        user.avatar_url = avatarUrl || undefined;
+      }
       user.updated_at = nowIso;
       saveLocalUsers(localUsers);
 
-      const updatedProfile: UserProfile = {
-        id: userId,
-        full_name: fullName,
-        username,
-        email: user.email,
-        email_verified: Boolean(user.email_verified),
-        created_at: user.created_at,
-        updated_at: nowIso
-      };
-
       const session = this.getCurrentSession();
       if (session && session.user.id === userId) {
-        session.user = updatedProfile;
+        session.user.full_name = fullName;
+        if (avatarUrl !== undefined) {
+          session.user.avatar_url = avatarUrl || undefined;
+        }
+        session.user.updated_at = nowIso;
         saveLocalSession(session);
       }
 
       withTimeout(updateDoc(doc(db, 'users', userId), {
         full_name: fullName,
-        username,
+        ...(avatarUrl !== undefined ? { avatar_url: avatarUrl || null } : {}),
         updated_at: nowIso
       }), 1200).catch(() => {});
 
-      return { success: true, user: updatedProfile };
+      return { success: true, user: session?.user };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Erro ao atualizar perfil.' };
+    }
+  },
+
+  async updateAvatar(userId: string, avatarUrl: string | null): Promise<{ success: boolean; user?: UserProfile; error?: string }> {
+    try {
+      const localUsers = getLocalUsers();
+      const user = localUsers.find(u => u.id === userId);
+      if (!user) {
+        return { success: false, error: 'Usuário não encontrado.' };
+      }
+
+      const nowIso = new Date().toISOString();
+      user.avatar_url = avatarUrl || undefined;
+      user.updated_at = nowIso;
+      saveLocalUsers(localUsers);
+
+      const session = this.getCurrentSession();
+      if (session && session.user.id === userId) {
+        session.user.avatar_url = avatarUrl || undefined;
+        session.user.updated_at = nowIso;
+        saveLocalSession(session);
+      }
+
+      withTimeout(updateDoc(doc(db, 'users', userId), {
+        avatar_url: avatarUrl || null,
+        updated_at: nowIso
+      }), 1200).catch(() => {});
+
+      return { success: true, user: session?.user };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erro ao atualizar foto de perfil.' };
     }
   },
 

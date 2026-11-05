@@ -13,7 +13,7 @@ import {
   increment,
   type Firestore
 } from 'firebase/firestore';
-import type { Note, NoteShare } from '../types/note';
+import type { Note, NoteShare, SharedUserAccess } from '../types/note';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyD1kR3dRwS_K8ZNximxR10v0Ea1OnQt38I",
@@ -47,24 +47,31 @@ export const FirebaseService = {
   // Save or update note in Firestore
   async saveNote(note: Note): Promise<boolean> {
     try {
+      const allowedUsers = note.share?.allowed_users || [];
+      const allowedUsernames = allowedUsers.map((u) =>
+        u.username.toLowerCase().replace(/^@+/, '')
+      );
+
       const noteRef = doc(db, 'notes', note.id);
       await withTimeout(setDoc(noteRef, {
         id: note.id,
         local_id: note.local_id || note.id,
-        title: note.title,
-        content: note.content,
+        title: note.title || '',
+        content: note.content || '',
         created_at: note.created_at,
         updated_at: note.updated_at,
         owner_token: note.owner_token,
         user_id: note.user_id || null,
+        owner_username: note.owner_username || null,
         is_pinned: Boolean(note.is_pinned),
         color: note.color || null,
         share: note.share || null,
-        attachments: note.attachments || []
+        attachments: note.attachments || [],
+        allowed_usernames: allowedUsernames,
       }, { merge: true }));
 
-      // If note has an active share, also update the note_shares collection!
-      if (note.share && note.share.custom_slug) {
+      // If note has a share, also sync the note_shares collection!
+      if (note.share) {
         await this.saveShare(note.share, note);
       }
 
@@ -75,35 +82,61 @@ export const FirebaseService = {
     }
   },
 
-  // Fetch all notes for a specific owner_token or user_id
-  async fetchNotes(ownerToken: string, userId?: string): Promise<Note[]> {
+  // Fetch all notes for a specific owner_token, user_id, or shared with user
+  async fetchNotes(ownerToken: string, userId?: string, username?: string): Promise<Note[]> {
     try {
       const notesRef = collection(db, 'notes');
-      const q = userId
-        ? query(notesRef, where('user_id', '==', userId))
-        : query(notesRef, where('owner_token', '==', ownerToken));
-      const snapshot = await withTimeout(getDocs(q));
+      const notesMap = new Map<string, Note>();
 
-      const notes: Note[] = [];
-      snapshot.forEach(docSnap => {
+      const addDocToMap = (docSnap: any) => {
         const data = docSnap.data();
-        notes.push({
-          id: data.id || docSnap.id,
-          local_id: data.local_id || docSnap.id,
+        const id = data.id || docSnap.id;
+        notesMap.set(id, {
+          id,
+          local_id: data.local_id || id,
           title: data.title || '',
           content: data.content || '',
           created_at: data.created_at || new Date().toISOString(),
           updated_at: data.updated_at || new Date().toISOString(),
           owner_token: data.owner_token || ownerToken,
           user_id: data.user_id || undefined,
+          owner_username: data.owner_username || undefined,
           is_pinned: Boolean(data.is_pinned),
           color: data.color || undefined,
           share: data.share || null,
-          attachments: data.attachments || []
+          attachments: data.attachments || [],
         });
-      });
+      };
 
-      // Sort by updated_at descending
+      // 1. Fetch by user_id
+      if (userId) {
+        try {
+          const userSnap = await withTimeout(getDocs(query(notesRef, where('user_id', '==', userId))), 2000);
+          userSnap.forEach(addDocToMap);
+        } catch {}
+      }
+
+      // 2. Fetch by owner_token
+      if (ownerToken) {
+        try {
+          const ownerSnap = await withTimeout(getDocs(query(notesRef, where('owner_token', '==', ownerToken))), 2000);
+          ownerSnap.forEach(addDocToMap);
+        } catch {}
+      }
+
+      // 3. Fetch notes shared with this user (@username)
+      if (username) {
+        const cleanUser = username.trim().toLowerCase().replace(/^@+/, '');
+        try {
+          const sharedSnap = await withTimeout(
+            getDocs(query(notesRef, where('allowed_usernames', 'array-contains', cleanUser))),
+            2000
+          );
+          sharedSnap.forEach(addDocToMap);
+        } catch {}
+      }
+
+      const notes = Array.from(notesMap.values());
       return notes.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
     } catch (err) {
       console.warn('Firebase fetchNotes error:', err);
@@ -134,8 +167,12 @@ export const FirebaseService = {
   // Save or update public share in Firestore
   async saveShare(share: NoteShare, note: Note): Promise<{ success: boolean; error?: string }> {
     try {
-      // Check if custom_slug is already taken by another note
-      const shareDocRef = doc(db, 'note_shares', share.custom_slug);
+      const targetSlug = (share.custom_slug || note.id).trim();
+      const allowedUsers = share.allowed_users || note.share?.allowed_users || [];
+      const allowedUsernames = allowedUsers.map((u) => u.username.toLowerCase().replace(/^@+/, ''));
+
+      // Check if targetSlug is already taken by another note
+      const shareDocRef = doc(db, 'note_shares', targetSlug);
       const existing = await withTimeout(getDoc(shareDocRef));
 
       if (existing.exists()) {
@@ -145,25 +182,53 @@ export const FirebaseService = {
         }
       }
 
-      // Save share doc (accessible by any visitor)
-      await withTimeout(setDoc(shareDocRef, {
-        id: share.id,
+      const sharePayload = {
+        id: share.id || crypto.randomUUID(),
         note_id: note.id,
-        custom_slug: share.custom_slug,
+        custom_slug: targetSlug,
         is_password_protected: Boolean(share.is_password_protected),
         password_salt: share.password_salt || null,
         password_hash: share.password_hash || null,
-        is_active: share.is_active,
-        created_at: share.created_at,
-        updated_at: share.updated_at,
+        is_active: share.is_active ?? true,
+        created_at: share.created_at || new Date().toISOString(),
+        updated_at: share.updated_at || new Date().toISOString(),
         view_count: share.view_count || 0,
+        owner_token: note.owner_token || share.owner_token || null,
+        owner_user_id: note.user_id || share.owner_user_id || null,
+        owner_username: note.owner_username || share.owner_username || null,
+        allowed_users: allowedUsers,
+        allowed_usernames: allowedUsernames,
         // Public note presentation fields
-        note_title: note.title,
-        note_content: note.content,
+        note_title: note.title || '',
+        note_content: note.content || '',
         note_created_at: note.created_at,
         note_updated_at: note.updated_at,
         note_attachments: note.attachments || []
-      }, { merge: true }));
+      };
+
+      // 1. Save share doc at targetSlug
+      await withTimeout(setDoc(shareDocRef, sharePayload, { merge: true }));
+
+      // 2. If targetSlug is different from note.id, ALSO save alias at note_shares/{note.id}
+      // so visiting /notpad/<note.id> works 100% reliably across all devices!
+      if (targetSlug !== note.id) {
+        const aliasDocRef = doc(db, 'note_shares', note.id);
+        await withTimeout(setDoc(aliasDocRef, sharePayload, { merge: true })).catch(() => {});
+      }
+
+      // 3. Keep notes collection in sync with the share and allowed_usernames
+      const noteDocRef = doc(db, 'notes', note.id);
+      await withTimeout(
+        setDoc(
+          noteDocRef,
+          {
+            share: { ...share, custom_slug: targetSlug, allowed_users: allowedUsers },
+            allowed_usernames: allowedUsernames,
+            updated_at: share.updated_at || new Date().toISOString(),
+          },
+          { merge: true }
+        )
+      ).catch(() => {});
 
       return { success: true };
     } catch (err: any) {
@@ -207,50 +272,107 @@ export const FirebaseService = {
     error?: string;
   }> {
     try {
-      const shareDocRef = doc(db, 'note_shares', slug);
-      const snap = await withTimeout(getDoc(shareDocRef));
+      let data: any = null;
+      let shareDocRef = doc(db, 'note_shares', slug);
+      let snap = await withTimeout(getDoc(shareDocRef));
 
-      if (!snap.exists()) {
+      // 1. Try directly from note_shares/{slug}
+      if (snap.exists()) {
+        data = snap.data();
+      }
+
+      // 2. If not found in note_shares, try notes/{slug} (UUID / ID match)!
+      if (!data) {
+        const noteDocRef = doc(db, 'notes', slug);
+        const noteSnap = await withTimeout(getDoc(noteDocRef));
+        if (noteSnap.exists()) {
+          const noteRaw = noteSnap.data();
+          data = {
+            id: noteRaw.id || noteSnap.id,
+            note_id: noteRaw.id || noteSnap.id,
+            custom_slug: noteRaw.share?.custom_slug || slug,
+            is_password_protected: Boolean(noteRaw.share?.is_password_protected),
+            password_salt: noteRaw.share?.password_salt,
+            password_hash: noteRaw.share?.password_hash,
+            is_active: noteRaw.share ? noteRaw.share.is_active : true,
+            created_at: noteRaw.created_at,
+            updated_at: noteRaw.updated_at,
+            view_count: noteRaw.share?.view_count || 0,
+            owner_token: noteRaw.owner_token,
+            owner_user_id: noteRaw.user_id,
+            owner_username: noteRaw.owner_username,
+            allowed_users: noteRaw.share?.allowed_users || [],
+            note_title: noteRaw.title || '',
+            note_content: noteRaw.content || '',
+            note_created_at: noteRaw.created_at,
+            note_updated_at: noteRaw.updated_at,
+            note_attachments: noteRaw.attachments || [],
+          };
+        }
+      }
+
+      // 3. If still not found, search note_shares where note_id == slug
+      if (!data) {
+        const sharesRef = collection(db, 'note_shares');
+        const qSnap = await withTimeout(getDocs(query(sharesRef, where('note_id', '==', slug))));
+        if (!qSnap.empty) {
+          data = qSnap.docs[0].data();
+          shareDocRef = qSnap.docs[0].ref as any;
+        }
+      }
+
+      if (!data) {
         return { found: false, error: 'Nota não encontrada.' };
       }
 
-      const data = snap.data();
-      if (!data.is_active) {
+      if (data.is_active === false) {
         return { found: false, error: 'O compartilhamento desta nota foi desativado.' };
       }
 
       // Increment view count asynchronously
-      updateDoc(shareDocRef, { view_count: increment(1) }).catch(() => {});
+      try {
+        if (shareDocRef) {
+          updateDoc(shareDocRef, { view_count: increment(1) }).catch(() => {});
+        }
+      } catch {}
 
       const isProtected = Boolean(data.is_password_protected);
+      const allowedUsers: SharedUserAccess[] = data.allowed_users || data.share?.allowed_users || [];
 
       return {
         found: true,
         share: {
-          id: data.id || snap.id,
-          note_id: data.note_id,
+          id: data.id || data.note_id || slug,
+          note_id: data.note_id || data.id || slug,
           custom_slug: data.custom_slug || slug,
           is_password_protected: isProtected,
           password_salt: data.password_salt,
           password_hash: data.password_hash,
-          is_active: data.is_active,
-          created_at: data.created_at || new Date().toISOString(),
-          updated_at: data.updated_at || new Date().toISOString(),
-          view_count: (data.view_count || 0) + 1
+          is_active: data.is_active ?? true,
+          created_at: data.created_at || data.note_created_at || new Date().toISOString(),
+          updated_at: data.updated_at || data.note_updated_at || new Date().toISOString(),
+          view_count: (data.view_count || 0) + 1,
+          owner_token: data.owner_token,
+          owner_user_id: data.owner_user_id || data.user_id,
+          owner_username: data.owner_username,
+          allowed_users: allowedUsers,
         },
         note: {
-          id: data.note_id,
-          title: data.note_title || 'Nota sem título',
+          id: data.note_id || data.id || slug,
+          title: data.note_title ?? data.title ?? 'Nota sem título',
           // If password protected, do NOT expose content until password verified!
-          content: isProtected ? '' : (data.note_content || ''),
-          created_at: data.note_created_at,
-          updated_at: data.note_updated_at,
-          attachments: data.note_attachments || []
+          content: isProtected ? '' : (data.note_content ?? data.content ?? ''),
+          created_at: data.note_created_at || data.created_at,
+          updated_at: data.note_updated_at || data.updated_at,
+          attachments: data.note_attachments || data.attachments || [],
+          owner_token: data.owner_token,
+          user_id: data.owner_user_id || data.user_id,
+          owner_username: data.owner_username,
         }
       };
     } catch (err: any) {
       console.warn('Firebase fetchPublicNote error:', err);
-      return { found: false, error: err?.message || 'Erro ao carregar do Firebase.' };
+      return { found: false, error: err?.message || 'Erro ao carregar do servidor.' };
     }
   },
 
@@ -261,7 +383,13 @@ export const FirebaseService = {
       const snap = await withTimeout(getDoc(shareDocRef));
       if (snap.exists()) {
         const data = snap.data();
-        return data.note_content || null;
+        if (data.note_content) return data.note_content;
+      }
+      const noteDocRef = doc(db, 'notes', slug);
+      const noteSnap = await withTimeout(getDoc(noteDocRef));
+      if (noteSnap.exists()) {
+        const data = noteSnap.data();
+        return data.content || null;
       }
       return null;
     } catch (err) {

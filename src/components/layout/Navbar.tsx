@@ -12,7 +12,6 @@ import {
   LogOut,
   ChevronDown,
   Sparkles,
-  Mail,
   Home,
   ShieldCheck
 } from 'lucide-react';
@@ -166,8 +165,12 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-xl border border-brand-500/30 bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 text-xs font-semibold transition-all shadow-sm shadow-brand-500/10"
               title={`Conta: @${user.username}`}
             >
-              <div className="w-5 h-5 rounded-lg bg-brand-500 text-white flex items-center justify-center text-[11px] font-bold shrink-0">
-                {user.full_name ? user.full_name[0].toUpperCase() : 'U'}
+              <div className="w-5 h-5 rounded-lg bg-brand-500 text-white flex items-center justify-center text-[11px] font-bold shrink-0 overflow-hidden">
+                {user.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  user.full_name ? user.full_name[0].toUpperCase() : 'U'
+                )}
               </div>
               <span className="max-w-[90px] sm:max-w-[120px] truncate font-mono">
                 @{user.username}
@@ -177,13 +180,22 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {dropdownOpen && (
               <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl bg-[#050505] border border-[#1c1c1c] shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="px-3 py-2 border-b border-[#1c1c1c]">
-                  <p className="text-xs font-bold text-gray-100 truncate">
-                    {user.full_name}
-                  </p>
-                  <p className="text-[11px] text-gray-400 font-mono truncate">
-                    @{user.username}
-                  </p>
+                <div className="px-3 py-2 border-b border-[#1c1c1c] flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-brand-500 text-white flex items-center justify-center text-xs font-bold shrink-0 overflow-hidden shadow-sm">
+                    {user.avatar_url ? (
+                      <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      user.full_name ? user.full_name[0].toUpperCase() : 'U'
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-gray-100 truncate">
+                      {user.full_name}
+                    </p>
+                    <p className="text-[11px] text-gray-400 font-mono truncate">
+                      @{user.username}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="py-1">
@@ -223,17 +235,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <User className="w-3.5 h-3.5 text-brand-400" />
                     <span>Minha Conta</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDropdownOpen(false);
-                      onOpenSettings('email');
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-300 hover:bg-[#121212] rounded-xl transition-colors text-left"
-                  >
-                    <Mail className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Serviço de E-mail</span>
                   </button>
                   <button
                     type="button"

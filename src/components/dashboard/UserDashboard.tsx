@@ -15,6 +15,7 @@ import {
   Lightbulb, 
   Sparkles,
   ArrowRight,
+  ShieldCheck,
   X
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -67,6 +68,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   // Filtered and sorted notes
   const filteredNotes = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
+    const myUsername = user ? user.username.trim().toLowerCase().replace(/^@+/, '') : '';
+
     return notes
       .filter((note) => {
         if (q) {
@@ -78,7 +81,15 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         }
 
         if (filter === 'pinned' && !note.is_pinned) return false;
-        if (filter === 'shared' && (!note.share || !note.share.is_active)) return false;
+        if (filter === 'shared') {
+          const isNoteShared = Boolean(note.share && note.share.is_active);
+          const isSharedWithMe = Boolean(
+            note.share?.allowed_users?.some(
+              (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUsername
+            )
+          );
+          if (!isNoteShared && !isSharedWithMe) return false;
+        }
 
         return true;
       })
@@ -87,10 +98,21 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         if (!a.is_pinned && b.is_pinned) return 1;
         return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
       });
-  }, [notes, searchQuery, filter]);
+  }, [notes, searchQuery, filter, user]);
 
   const pinnedCount = useMemo(() => notes.filter(n => n.is_pinned).length, [notes]);
-  const sharedCount = useMemo(() => notes.filter(n => n.share && n.share.is_active).length, [notes]);
+  const sharedCount = useMemo(() => {
+    const myUser = user ? user.username.trim().toLowerCase().replace(/^@+/, '') : '';
+    return notes.filter(
+      (n) =>
+        (n.share && n.share.is_active) ||
+        Boolean(
+          n.share?.allowed_users?.some(
+            (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUser
+          )
+        )
+    ).length;
+  }, [notes, user]);
 
   // Quick templates
   const templates = [
@@ -173,7 +195,14 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 <span>Página Inicial do Usuário</span>
               </div>
 
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-100 tracking-tight flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-100 tracking-tight flex items-center gap-3 flex-wrap">
+                {user?.avatar_url && (
+                  <img
+                    src={user.avatar_url}
+                    alt={user.full_name}
+                    className="w-10 h-10 rounded-2xl object-cover border border-[#262626] shadow-md shrink-0"
+                  />
+                )}
                 <span>Olá, {user?.full_name || 'Usuário'}</span>
                 {user?.username && (
                   <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-lg bg-[#141414] border border-[#222] text-gray-400">
@@ -351,6 +380,10 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               {filteredNotes.map((note) => {
                 const excerpt = getExcerpt(note.content);
                 const isShared = Boolean(note.share && note.share.is_active);
+                const myUser = user ? user.username.trim().toLowerCase().replace(/^@+/, '') : '';
+                const mySharedAccess = note.share?.allowed_users?.find(
+                  (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUser
+                );
 
                 return (
                   <div
@@ -407,12 +440,22 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {isShared && (
-                          <span title="Compartilhada" className="text-cyan-400 flex items-center gap-1">
+                        {mySharedAccess ? (
+                          <span
+                            title={`Compartilhada com você como ${mySharedAccess.role === 'admin' ? 'Admin / Editor' : 'Leitor'}`}
+                            className="text-purple-400 flex items-center gap-1 font-medium"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span className="text-[10px]">
+                              {mySharedAccess.role === 'admin' ? 'Admin / Editor' : 'Leitor'}
+                            </span>
+                          </span>
+                        ) : isShared ? (
+                          <span title="Compartilhada publicamente" className="text-cyan-400 flex items-center gap-1">
                             <Share2 className="w-3 h-3" />
                             <span className="text-[10px]">Pública</span>
                           </span>
-                        )}
+                        ) : null}
                         {note.attachments && note.attachments.length > 0 && (
                           <span title={`${note.attachments.length} anexo(s)`} className="text-brand-400 flex items-center gap-0.5">
                             <Paperclip className="w-3 h-3" />

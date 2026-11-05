@@ -24,6 +24,7 @@ export interface UserProfile {
   full_name: string;
   username: string; // unique, lowercase
   email: string;
+  avatar_url?: string;
   role?: UserRole; // 'admin' | 'user'
   birth_date?: string; // YYYY-MM-DD
   security_question?: string;
