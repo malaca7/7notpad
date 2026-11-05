@@ -799,4 +799,34 @@ export const CloudShareService = {
       return null;
     }
   },
+
+  /**
+   * Sync global platform settings & announcement banner to the cloud in real time
+   */
+  async syncPlatformSettingsToCloud(settings: Record<string, any>): Promise<void> {
+    try {
+      const cfgKey = '7notpad_platform_settings_v2';
+      await saveCloudDocument(cfgKey, { settings, updated_at: new Date().toISOString() });
+      publishGlobalRealtimeEvent({
+        type: 'settings_updated',
+        settings,
+      });
+    } catch {}
+  },
+
+  /**
+   * Fetch global platform settings & announcement banner from the cloud
+   */
+  async fetchPlatformSettingsFromCloud(): Promise<Record<string, any> | null> {
+    try {
+      const cfgKey = '7notpad_platform_settings_v2';
+      const doc = await fetchCloudDocument(cfgKey);
+      if (doc?.settings && typeof doc.settings === 'object') {
+        return doc.settings;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
 };

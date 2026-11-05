@@ -7,7 +7,7 @@ import { UserDashboard } from './components/dashboard/UserDashboard';
 import { ShareModal } from './components/share/ShareModal';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { PublicNoteView } from './components/share/PublicNoteView';
-import { BrowserWarningBanner } from './components/settings/BrowserWarningBanner';
+import { GlobalAnnouncementBanner } from './components/common/GlobalAnnouncementBanner';
 import { AuthModal, type AuthModalView } from './components/auth/AuthModal';
 import { EmailNotificationToast } from './components/auth/EmailNotificationToast';
 import { LandingHome } from './components/home/LandingHome';
@@ -18,7 +18,7 @@ import { isUserAdmin } from './types/auth';
 import { PlatformSettingsService, type PlatformLimits } from './lib/platformSettings';
 import { getLocalNotes } from './lib/storage';
 import { CloudShareService } from './lib/cloudShare';
-import { FileText, Plus, Share2, Copy, Check, Settings, Home, ShieldCheck, Megaphone } from 'lucide-react';
+import { FileText, Plus, Share2, Copy, Check, Settings, Home, ShieldCheck } from 'lucide-react';
 
 export function MainLayout() {
   const { user, isAuthenticated } = useAuth();
@@ -45,10 +45,19 @@ export function MainLayout() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
   const [mobileCopiedLink, setMobileCopiedLink] = useState(false);
 
-  // Sync and subscribe to platform limits
+  // Sync and subscribe to platform limits (local storage + cloud real-time broadcast)
   useEffect(() => {
     PlatformSettingsService.fetchLimits().then(setPlatformLimits);
-    return PlatformSettingsService.subscribe(setPlatformLimits);
+    const unsubLocal = PlatformSettingsService.subscribe(setPlatformLimits);
+    const unsubRemote = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
+      if (event.type === 'settings_updated') {
+        PlatformSettingsService.fetchLimits().then(setPlatformLimits);
+      }
+    });
+    return () => {
+      unsubLocal();
+      unsubRemote();
+    };
   }, []);
 
   // Sync active user profile to global cloud directory
@@ -279,7 +288,8 @@ export function MainLayout() {
   // ========================================================
   if (!isAuthenticated) {
     return (
-      <>
+      <div className="min-h-screen flex flex-col bg-black">
+        <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={false} />
         <LandingHome
           onStartWriting={() => {
             setAuthModalView('signup');
@@ -304,7 +314,7 @@ export function MainLayout() {
           }}
         />
         <EmailNotificationToast />
-      </>
+      </div>
     );
   }
 
@@ -313,7 +323,8 @@ export function MainLayout() {
   // ========================================================
   if (publicSlug) {
     return (
-      <>
+      <div className="min-h-screen flex flex-col bg-black">
+        <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={isAuthenticated} />
         <PublicNoteView
           slug={publicSlug}
           onGoHome={handleGoHome}
@@ -335,7 +346,7 @@ export function MainLayout() {
           }}
         />
         <EmailNotificationToast />
-      </>
+      </div>
     );
   }
 
@@ -346,15 +357,7 @@ export function MainLayout() {
   return (
     <div className="flex flex-col h-[100dvh] w-screen bg-black text-gray-100 overflow-hidden font-sans">
       {/* Global Broadcast Announcement Banner */}
-      {platformLimits.announcementActive && platformLimits.announcementBanner && (
-        <aside aria-label="Aviso Global" className="bg-gradient-to-r from-brand-600 via-cyan-600 to-brand-600 text-white text-xs py-1.5 px-4 text-center font-medium shadow-md flex items-center justify-center gap-2 shrink-0 z-30">
-          <Megaphone className="w-3.5 h-3.5 shrink-0" />
-          <span>{platformLimits.announcementBanner}</span>
-        </aside>
-      )}
-
-      {/* Browser Data Persistence Notice */}
-      <BrowserWarningBanner />
+      <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={isAuthenticated} />
 
       {/* Top Navbar */}
       <Navbar

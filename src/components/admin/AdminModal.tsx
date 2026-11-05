@@ -19,14 +19,20 @@ import {
   Pin, 
   BarChart3,
   Megaphone,
-  ExternalLink
+  ExternalLink,
+  AlertTriangle,
+  AlertOctagon,
+  Eye,
+  Radio,
+  Globe,
+  UserCheck
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { useToast } from '../common/Toast';
 import { AdminService, type AdminStats } from '../../lib/adminService';
 import { CloudShareService } from '../../lib/cloudShare';
-import { PlatformSettingsService, type PlatformLimits } from '../../lib/platformSettings';
+import { PlatformSettingsService, type PlatformLimits, type AnnouncementType, type AnnouncementAudience } from '../../lib/platformSettings';
 import type { UserProfile, UserRole } from '../../types/auth';
 import type { Note, NoteShare } from '../../types/note';
 
@@ -514,6 +520,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       success('Regras e Limites Atualizados!', 'As novas configurações já estão valendo na plataforma.');
     } catch {
       error('Erro ao salvar regras');
+    }
+  };
+
+  const handleToggleBroadcast = async (newActiveState: boolean) => {
+    if (newActiveState && !limits.announcementBanner?.trim()) {
+      error('Mensagem vazia', 'Escreva uma mensagem antes de ativar a transmissão no ar.');
+      return;
+    }
+    const updated = { ...limits, announcementActive: newActiveState };
+    setLimits(updated);
+    try {
+      await AdminService.updatePlatformLimits(updated);
+      if (newActiveState) {
+        success('Transmissão Ativada no Topo!', 'O banner já está sendo exibido em tempo real no site.');
+      } else {
+        success('Transmissão Desativada!', 'O banner foi removido do topo do site.');
+      }
+    } catch {
+      error('Erro ao atualizar transmissão.');
     }
   };
 
@@ -1330,32 +1355,257 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </label>
             </div>
 
-            {/* Broadcast Banner */}
-            <div className="p-4 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-200">
-                  <Megaphone className="w-4 h-4 text-cyan-400" />
-                  Transmissão de Aviso Global (Banner)
+            {/* Broadcast Banner Control Center */}
+            <div className="p-5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-4">
+              {/* Header with Switch */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1c1c1c]">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                      <Megaphone className="w-4 h-4" />
+                    </div>
+                    <span className="text-sm font-bold text-gray-100">Transmissão de Aviso Global (Banner)</span>
+                    {limits.announcementActive ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                        </span>
+                        NO AR
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-800 text-gray-400 border border-gray-700">
+                        DESLIGADO
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Transmita avisos e comunicados em tempo real no topo do site para todos os visitantes e usuários conectados.
+                  </p>
                 </div>
 
-                <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={limits.announcementActive}
-                    onChange={(e) => setLimits(prev => ({ ...prev, announcementActive: e.target.checked }))}
-                    className="w-4 h-4 rounded text-cyan-500 focus:ring-0"
-                  />
-                  <span>Exibir no Topo</span>
-                </label>
+                {/* Instant On/Off Button */}
+                <button
+                  type="button"
+                  onClick={() => handleToggleBroadcast(!limits.announcementActive)}
+                  className={`inline-flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                    limits.announcementActive
+                      ? 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
+                      : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/25'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>{limits.announcementActive ? 'Desativar Transmissão' : 'Ativar no Topo Agora'}</span>
+                </button>
               </div>
 
-              <input
-                type="text"
-                value={limits.announcementBanner}
-                onChange={(e) => setLimits(prev => ({ ...prev, announcementBanner: e.target.value }))}
-                placeholder="Ex: Estamos realizando melhorias de infraestrutura programadas..."
-                className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
-              />
+              {/* 1. Tipo / Severidade do Aviso */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                  <span>Estilo & Severidade do Aviso</span>
+                  <span className="text-[11px] text-gray-400 font-normal">Define cores, ícone e destaque visual</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'info', label: 'Informativo', desc: 'Geral & Anúncios', icon: <Megaphone className="w-3.5 h-3.5 text-cyan-400" />, activeClass: 'border-cyan-500 bg-cyan-500/15 text-cyan-200' },
+                    { id: 'warning', label: 'Atenção', desc: 'Alertas & Avisos', icon: <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />, activeClass: 'border-amber-500 bg-amber-500/15 text-amber-200' },
+                    { id: 'critical', label: 'Urgente', desc: 'Crítico & Parada', icon: <AlertOctagon className="w-3.5 h-3.5 text-rose-400" />, activeClass: 'border-rose-500 bg-rose-500/15 text-rose-200' },
+                    { id: 'success', label: 'Novidade', desc: 'Lançamentos & Info', icon: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />, activeClass: 'border-emerald-500 bg-emerald-500/15 text-emerald-200' },
+                  ].map((item) => {
+                    const isSelected = (limits.announcementType || 'info') === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setLimits(prev => ({ ...prev, announcementType: item.id as AnnouncementType }))}
+                        className={`p-2.5 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? item.activeClass
+                            : 'border-[#1c1c1c] bg-[#0c0c0c] text-gray-400 hover:border-gray-700 hover:text-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-xs mb-0.5">
+                          {item.icon}
+                          <span>{item.label}</span>
+                        </div>
+                        <div className="text-[10px] text-gray-400">{item.desc}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 2. Público-Alvo da Transmissão */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
+                  <span>Público-Alvo da Transmissão</span>
+                  <span className="text-[11px] text-gray-400 font-normal">Quem poderá visualizar o banner</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'all', label: 'Todos os Visitantes & Membros', icon: <Globe className="w-3.5 h-3.5" /> },
+                    { id: 'authenticated', label: 'Apenas Usuários Logados', icon: <UserCheck className="w-3.5 h-3.5" /> },
+                    { id: 'anonymous', label: 'Apenas Visitantes (Landing)', icon: <Users className="w-3.5 h-3.5" /> },
+                  ].map((aud) => {
+                    const isSelected = (limits.announcementAudience || 'all') === aud.id;
+                    return (
+                      <button
+                        key={aud.id}
+                        type="button"
+                        onClick={() => setLimits(prev => ({ ...prev, announcementAudience: aud.id as AnnouncementAudience }))}
+                        className={`px-3 py-2 rounded-xl border text-xs font-medium flex items-center gap-2 transition-all ${
+                          isSelected
+                            ? 'border-brand-500 bg-brand-500/15 text-brand-200'
+                            : 'border-[#1c1c1c] bg-[#0c0c0c] text-gray-400 hover:border-gray-700 hover:text-gray-200'
+                        }`}
+                      >
+                        {aud.icon}
+                        <span className="truncate">{aud.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Mensagem do Aviso */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-gray-300">Mensagem da Transmissão</label>
+                  <span className="text-[10px] text-gray-400 font-mono">
+                    {(limits.announcementBanner || '').length} caracteres
+                  </span>
+                </div>
+                <textarea
+                  rows={2}
+                  value={limits.announcementBanner || ''}
+                  onChange={(e) => setLimits(prev => ({ ...prev, announcementBanner: e.target.value }))}
+                  placeholder="Ex: Estamos realizando melhorias de infraestrutura programadas na nuvem..."
+                  className="w-full px-3 py-2 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-cyan-500 transition-colors resize-none"
+                />
+
+                {/* Modelos Rápidos de Mensagem */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mr-1">Modelos:</span>
+                  {[
+                    { label: '📢 Atualização', text: 'Nova atualização disponível! Sincronização em tempo real e perfil aprimorados.' },
+                    { label: '🛠️ Manutenção', text: 'Manutenção programada hoje das 22h às 23h. Suas notas salvas continuam intactas.' },
+                    { label: '🚀 Dica de Nuvem', text: 'Vincule seu usuário para manter seus blocos de notas acessíveis de qualquer aparelho.' },
+                  ].map((tpl, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setLimits(prev => ({ ...prev, announcementBanner: tpl.text }))}
+                      className="px-2 py-0.5 rounded-lg bg-[#141414] hover:bg-[#1f1f1f] border border-[#222] text-[11px] text-gray-300 transition-colors"
+                    >
+                      {tpl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Link & Ação (Opcional) + Opção de Fechar */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-300">Link de Ação (URL Opcional)</label>
+                  <input
+                    type="url"
+                    value={limits.announcementLink || ''}
+                    onChange={(e) => setLimits(prev => ({ ...prev, announcementLink: e.target.value }))}
+                    placeholder="https://exemplo.com ou /notpad"
+                    className="w-full px-3 py-2 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-300">Texto do Botão de Ação</label>
+                  <input
+                    type="text"
+                    value={limits.announcementLinkLabel || ''}
+                    onChange={(e) => setLimits(prev => ({ ...prev, announcementLinkLabel: e.target.value }))}
+                    placeholder="Ex: Ver Detalhes, Saiba Mais, Acessar"
+                    className="w-full px-3 py-2 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+
+              {/* Dismissible Toggle */}
+              <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] cursor-pointer hover:bg-[#121212] transition-colors">
+                <input
+                  type="checkbox"
+                  checked={limits.announcementDismissible !== false}
+                  onChange={(e) => setLimits(prev => ({ ...prev, announcementDismissible: e.target.checked }))}
+                  className="w-4 h-4 rounded text-cyan-500 focus:ring-0 bg-transparent"
+                />
+                <div className="text-xs">
+                  <span className="font-semibold text-gray-200">Permitir que o usuário feche o aviso</span>
+                  <span className="text-gray-400 block text-[11px]">
+                    Se marcado, exibe o botão (X). O usuário dispensa o aviso apenas para a sessão atual. Se o admin alterar a mensagem, o aviso reaparece automaticamente.
+                  </span>
+                </div>
+              </label>
+
+              {/* 5. Pré-visualização ao Vivo */}
+              <div className="pt-2 space-y-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                  <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Pré-visualização em Tempo Real (Como aparecerá no site)</span>
+                </div>
+
+                <div className="p-2 rounded-xl bg-black border border-[#222]">
+                  {limits.announcementBanner?.trim() ? (
+                    <div className={`w-full py-2 px-3 sm:px-4 rounded-lg flex items-center justify-between gap-3 text-xs select-none transition-all ${
+                      {
+                        info: 'border border-cyan-500/30 bg-gradient-to-r from-cyan-950/95 via-[#0c1629] to-cyan-950/95 text-cyan-100 shadow-md',
+                        warning: 'border border-amber-500/30 bg-gradient-to-r from-amber-950/95 via-[#1b1406] to-amber-950/95 text-amber-100 shadow-md',
+                        critical: 'border border-rose-500/40 bg-gradient-to-r from-rose-950/95 via-[#220910] to-rose-950/95 text-rose-100 shadow-md',
+                        success: 'border border-emerald-500/30 bg-gradient-to-r from-emerald-950/95 via-[#081a12] to-emerald-950/95 text-emerald-100 shadow-md',
+                      }[limits.announcementType || 'info']
+                    }`}>
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-current" />
+                        </span>
+                        {{
+                          info: <Megaphone className="w-3.5 h-3.5 text-cyan-400 shrink-0" />,
+                          warning: <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
+                          critical: <AlertOctagon className="w-3.5 h-3.5 text-rose-400 shrink-0 animate-pulse" />,
+                          success: <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />,
+                        }[limits.announcementType || 'info']}
+                        <span className="text-[10px] font-bold uppercase font-mono px-1.5 py-0.5 rounded border shrink-0 bg-white/10 border-white/20">
+                          {{
+                            info: 'Aviso',
+                            warning: 'Atenção',
+                            critical: 'Urgente',
+                            success: 'Novidade',
+                          }[limits.announcementType || 'info']}
+                        </span>
+                        <p className="text-xs font-medium leading-tight truncate">
+                          {limits.announcementBanner}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {limits.announcementLink && limits.announcementLink.trim() && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-white/15 border border-white/25">
+                            {limits.announcementLinkLabel || 'Ver Mais'}
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </span>
+                        )}
+                        {limits.announcementDismissible !== false && (
+                          <span className="p-0.5 text-gray-400">
+                            <X className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-3 text-center text-xs text-gray-500 italic">
+                      Digite uma mensagem acima para visualizar o banner em tempo real.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end pt-2">
