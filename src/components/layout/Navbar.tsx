@@ -6,7 +6,6 @@ import {
   Sun, 
   Moon, 
   Settings as SettingsIcon, 
-  Cloud, 
   Download,
   User,
   LogOut,
@@ -32,7 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleMobileSidebar,
   onOpenSettings,
   onOpenAuthModal,
-  totalNotes,
+  totalNotes: _totalNotes,
   onGoToDashboard,
   isDashboard = false,
   onOpenAdmin,
@@ -97,17 +96,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Sync Status Badge & Action Controls */}
       <div className="flex items-center gap-1.5 sm:gap-2.5">
-        {/* Cloud Sync Status */}
-        <button
-          type="button"
-          onClick={() => onOpenSettings('cloud')}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20 transition-colors"
-          title={`Sincronização em Nuvem Ativa (${totalNotes} notas)`}
-        >
-          <Cloud className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Sincronizado na Nuvem</span>
-        </button>
-
         {/* Quick Export Backup */}
         <button
           type="button"
