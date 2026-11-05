@@ -51,7 +51,17 @@ export function MainLayout() {
     const unsubLocal = PlatformSettingsService.subscribe(setPlatformLimits);
     const unsubRemote = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
       if (event.type === 'settings_updated') {
-        PlatformSettingsService.fetchLimits().then(setPlatformLimits);
+        if (event.settings && typeof event.settings === 'object') {
+          PlatformSettingsService.saveLocally(event.settings);
+          setPlatformLimits(event.settings);
+        } else {
+          PlatformSettingsService.fetchLimits().then(setPlatformLimits);
+        }
+      }
+      if (event.type === 'announcement_reset_dismissals') {
+        try {
+          sessionStorage.removeItem('7notpad_dismissed_announcement_text');
+        } catch {}
       }
     });
     return () => {
@@ -289,7 +299,7 @@ export function MainLayout() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen flex flex-col bg-black">
-        <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={false} />
+        <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={false} currentUser={null} />
         <LandingHome
           onStartWriting={() => {
             setAuthModalView('signup');
@@ -324,7 +334,7 @@ export function MainLayout() {
   if (publicSlug) {
     return (
       <div className="min-h-screen flex flex-col bg-black">
-        <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={isAuthenticated} />
+        <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={isAuthenticated} currentUser={user} />
         <PublicNoteView
           slug={publicSlug}
           onGoHome={handleGoHome}
@@ -357,7 +367,7 @@ export function MainLayout() {
   return (
     <div className="flex flex-col h-[100dvh] w-screen bg-black text-gray-100 overflow-hidden font-sans">
       {/* Global Broadcast Announcement Banner */}
-      <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={isAuthenticated} />
+      <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={isAuthenticated} currentUser={user} />
 
       {/* Top Navbar */}
       <Navbar

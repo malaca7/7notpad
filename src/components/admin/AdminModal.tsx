@@ -31,7 +31,7 @@ import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { useToast } from '../common/Toast';
 import { AdminService, type AdminStats } from '../../lib/adminService';
-import { CloudShareService } from '../../lib/cloudShare';
+import { CloudShareService, type AnnouncementReadReceipt } from '../../lib/cloudShare';
 import { PlatformSettingsService, type PlatformLimits, type AnnouncementType, type AnnouncementAudience } from '../../lib/platformSettings';
 import type { UserProfile, UserRole } from '../../types/auth';
 import type { Note, NoteShare } from '../../types/note';
@@ -62,6 +62,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [notes, setNotes] = useState<Note[]>([]);
   const [shares, setShares] = useState<Array<NoteShare & { note_title?: string }>>([]);
   const [limits, setLimits] = useState<PlatformLimits>(() => PlatformSettingsService.getLimits());
+  const [readReceipts, setReadReceipts] = useState<AnnouncementReadReceipt[]>([]);
 
   // Search & Filter states
   const [userSearch, setUserSearch] = useState('');
@@ -163,10 +164,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
 
-    // Load initial data including platform limits
+    // Load initial data including platform limits and read receipts
     loadAdminData(true);
+    CloudShareService.fetchAnnouncementReads().then(setReadReceipts);
 
-    // Auto-sync in real time whenever any user creates/edits notes or accounts across the platform
+    // Auto-sync in real time whenever any user creates/edits notes, accounts or reads announcement
     const unsub = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
       // If a settings update arrives from another admin, only update if not actively on broadcast/limits tab
       if (event?.type === 'settings_updated') {
@@ -175,6 +177,10 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             if (fresh) setLimits(fresh);
           });
         }
+      } else if (event?.type === 'announcement_read_receipt' && event.receipt) {
+        setReadReceipts(prev => [event.receipt, ...prev.filter(r => r.id !== event.receipt.id)]);
+      } else if (event?.type === 'announcement_reset_dismissals') {
+        setReadReceipts([]);
       } else {
         loadAdminData(false);
       }
@@ -540,11 +546,30 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleSaveBroadcast = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!limits.announcementBanner?.trim()) {
+      error('Mensagem vazia', 'Escreva uma mensagem antes de salvar a transmissão.');
+      return;
+    }
+    const updated = {
+      ...limits,
+      announcementActive: true, // Garante que fica ativo no topo ao salvar
+    };
+    setLimits(updated);
     try {
-      await AdminService.updatePlatformLimits(limits);
-      success('Aviso Global Salvo!', 'As alterações do banner foram salvas e transmitidas na plataforma.');
+      await AdminService.updatePlatformLimits(updated);
+      success('Transmissão Ativa no Ar!', 'O aviso global foi salvo e já está sendo exibido para todos os usuários em tempo real.');
     } catch {
       error('Erro ao salvar aviso global');
+    }
+  };
+
+  const handleClearReadReceipts = async () => {
+    try {
+      await CloudShareService.clearAnnouncementReads();
+      setReadReceipts([]);
+      success('Confirmações Zeradas!', 'O aviso foi reexibido para todos os usuários que já o haviam fechado.');
+    } catch {
+      error('Erro ao zerar confirmações');
     }
   };
 
@@ -1668,6 +1693,102 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Confirmações de Leitura (Quem fechou ou marcou como lido) */}
+            <div className="p-5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1c1c1c]">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <CheckCircle2 className="w-4 h-4" />
+                    </div>
+                    <span className="text-sm font-bold text-gray-100">
+                      Leituras &amp; Confirmações (Quem Fechou o Aviso)
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+                      {readReceipts.length} {readReceipts.length === 1 ? 'registro' : 'registros'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Acompanhe em tempo real quais usuários ou visitantes já fecharam este aviso na tela deles.
+                  </p>
+                </div>
+
+                {readReceipts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearReadReceipts}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#121212] hover:bg-[#1a1a1a] text-gray-300 hover:text-white border border-[#222] text-xs font-semibold transition-all"
+                    title="Limpa as confirmações e força o banner a reaparecer para todos os usuários imediatamente"
+                  >
+                    <span>Zerar &amp; Reexibir para Todos</span>
+                  </button>
+                )}
+              </div>
+
+              {readReceipts.length === 0 ? (
+                <div className="py-6 text-center text-xs text-gray-500">
+                  <p>Nenhum usuário fechou este aviso até o momento.</p>
+                  <p className="text-[11px] text-gray-600 mt-0.5">
+                    Quando um membro ou visitante clicar no botão (X) de fechar, ele aparecerá listado aqui em tempo real.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {readReceipts.map((r) => {
+                    const dateFormatted = new Date(r.read_at).toLocaleString('pt-BR', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    });
+
+                    return (
+                      <div
+                        key={r.id}
+                        className="p-2.5 rounded-xl bg-[#0c0c0c] border border-[#1a1a1a] flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs uppercase shrink-0 ${
+                            r.is_anonymous ? 'bg-gray-800 text-gray-300' : 'bg-brand-600/20 text-brand-400 border border-brand-500/30'
+                          }`}>
+                            {r.full_name ? r.full_name.charAt(0) : '?'}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-gray-200 truncate">{r.full_name}</span>
+                              <span className="text-[11px] font-mono text-gray-500 truncate">@{r.username}</span>
+                              <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border uppercase tracking-wider shrink-0 ${
+                                r.is_anonymous
+                                  ? 'bg-gray-800 text-gray-400 border-gray-700'
+                                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                              }`}>
+                                {r.is_anonymous ? 'Visitante' : 'Membro'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-gray-500 truncate mt-0.5">
+                              Aviso: &quot;{r.announcement_banner}&quot;
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span>Fechou o aviso</span>
+                          </div>
+                          <div className="text-[10px] text-gray-500 font-mono">
+                            {dateFormatted}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-2">

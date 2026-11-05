@@ -8,10 +8,13 @@ import {
   X 
 } from 'lucide-react';
 import type { PlatformLimits, AnnouncementType } from '../../lib/platformSettings';
+import { CloudShareService } from '../../lib/cloudShare';
+import type { UserProfile } from '../../types/auth';
 
 interface GlobalAnnouncementBannerProps {
   limits: PlatformLimits;
   isAuthenticated: boolean;
+  currentUser?: UserProfile | null;
 }
 
 const DISMISSED_KEY = '7notpad_dismissed_announcement_text';
@@ -19,6 +22,7 @@ const DISMISSED_KEY = '7notpad_dismissed_announcement_text';
 export const GlobalAnnouncementBanner: React.FC<GlobalAnnouncementBannerProps> = ({
   limits,
   isAuthenticated,
+  currentUser,
 }) => {
   const [dismissedText, setDismissedText] = useState<string | null>(() => {
     try {
@@ -27,6 +31,19 @@ export const GlobalAnnouncementBanner: React.FC<GlobalAnnouncementBannerProps> =
       return null;
     }
   });
+
+  // Listen for admin reset dismissal events in real time
+  useEffect(() => {
+    const unsub = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
+      if (event?.type === 'announcement_reset_dismissals') {
+        setDismissedText(null);
+        try {
+          sessionStorage.removeItem(DISMISSED_KEY);
+        } catch {}
+      }
+    });
+    return unsub;
+  }, []);
 
   // Reset dismissal if announcement text changed
   useEffect(() => {
@@ -60,6 +77,15 @@ export const GlobalAnnouncementBanner: React.FC<GlobalAnnouncementBannerProps> =
       sessionStorage.setItem(DISMISSED_KEY, limits.announcementBanner);
     } catch {}
     setDismissedText(limits.announcementBanner);
+
+    // Record read/closed receipt in cloud so admin panel sees who closed it
+    CloudShareService.recordAnnouncementRead({
+      user_id: currentUser?.id,
+      username: currentUser?.username || 'Visitante',
+      full_name: currentUser?.full_name || currentUser?.username || 'Visitante Anônimo',
+      is_anonymous: !currentUser,
+      announcement_banner: limits.announcementBanner,
+    }).catch(() => {});
   };
 
   const type: AnnouncementType = limits.announcementType || 'info';

@@ -145,6 +145,8 @@ const DEFAULT_KNOWN_PATHS: Record<string, string> = {
   '7notpad_global_notes_catalog_v2': '7np-11-05-37',
   '7notpad_global_users_store_v2': '7np-11-05-5',
   '7notpad_users_directory_v2': '7np-11-05-32',
+  '7notpad_platform_settings_v2': '7np-11-05-69',
+  '7notpad_announcement_reads_v2': '7np-11-05-72',
 };
 
 // In-memory cache & serialization queues to prevent concurrent race conditions
@@ -829,4 +831,77 @@ export const CloudShareService = {
       return null;
     }
   },
+
+  /**
+   * Fetch all announcement read receipts from the cloud
+   */
+  async fetchAnnouncementReads(): Promise<AnnouncementReadReceipt[]> {
+    try {
+      const cfgKey = '7notpad_announcement_reads_v2';
+      const doc = await fetchCloudDocument(cfgKey);
+      if (doc && Array.isArray(doc.reads)) {
+        return doc.reads;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Record that a user closed / marked as read the announcement banner
+   */
+  async recordAnnouncementRead(receipt: Omit<AnnouncementReadReceipt, 'id' | 'read_at'>): Promise<void> {
+    try {
+      const cfgKey = '7notpad_announcement_reads_v2';
+      const existing = await this.fetchAnnouncementReads();
+      const readItem: AnnouncementReadReceipt = {
+        ...receipt,
+        id: `read_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        read_at: new Date().toISOString(),
+      };
+
+      // Remove duplicate reads from same user for same banner
+      const filtered = existing.filter(
+        (r) => !(r.username === receipt.username && r.announcement_banner === receipt.announcement_banner)
+      );
+      filtered.unshift(readItem);
+
+      await saveCloudDocument(cfgKey, {
+        reads: filtered.slice(0, 150),
+        updated_at: new Date().toISOString(),
+      });
+
+      publishGlobalRealtimeEvent({
+        type: 'announcement_read_receipt',
+        receipt: readItem,
+      });
+    } catch {}
+  },
+
+  /**
+   * Clear all announcement read receipts (e.g. when admin wants to re-display to all users)
+   */
+  async clearAnnouncementReads(): Promise<void> {
+    try {
+      const cfgKey = '7notpad_announcement_reads_v2';
+      await saveCloudDocument(cfgKey, {
+        reads: [],
+        updated_at: new Date().toISOString(),
+      });
+      publishGlobalRealtimeEvent({
+        type: 'announcement_reset_dismissals',
+      });
+    } catch {}
+  },
 };
+
+export interface AnnouncementReadReceipt {
+  id: string;
+  user_id?: string;
+  username: string;
+  full_name: string;
+  is_anonymous: boolean;
+  read_at: string;
+  announcement_banner: string;
+}
