@@ -404,42 +404,28 @@ export const AdminService = {
   async getAllNotes(): Promise<Note[]> {
     const notesMap = new Map<string, Note>();
 
-    // 1. Local notes
-    const local = getLocalNotes();
-    for (const n of local) {
-      notesMap.set(n.id, n);
-    }
-
-    // 2. Fetch from Firestore
+    // 1. Fetch from global cloud notes catalog (cross-device/all users)
     try {
-      const snap = await Promise.race([
-        getDocs(collection(db, 'notes')),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800)),
-      ]);
-
-      if (snap && !snap.empty) {
-        snap.forEach((d) => {
-          const data = d.data() as Partial<Note>;
-          if (data && data.id) {
-            notesMap.set(data.id, {
-              id: data.id,
-              local_id: data.local_id || data.id,
-              title: data.title || '',
-              content: data.content || '',
-              created_at: data.created_at || new Date().toISOString(),
-              updated_at: data.updated_at || new Date().toISOString(),
-              owner_token: data.owner_token || '',
-              user_id: data.user_id,
-              owner_username: data.owner_username,
-              is_pinned: Boolean(data.is_pinned),
-              color: data.color,
-              attachments: data.attachments || [],
-              share: data.share || null,
-            });
-          }
-        });
+      const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
+      for (const n of cloudNotes) {
+        if (n && n.id) {
+          notesMap.set(n.id, n);
+        }
       }
     } catch {}
+
+    // 2. Merge local notes (if newer or not in cloud yet)
+    const local = getLocalNotes();
+    for (const n of local) {
+      if (!notesMap.has(n.id)) {
+        notesMap.set(n.id, n);
+      } else {
+        const existing = notesMap.get(n.id)!;
+        if (new Date(n.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
+          notesMap.set(n.id, n);
+        }
+      }
+    }
 
     return Array.from(notesMap.values()).sort(
       (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
@@ -454,27 +440,36 @@ export const AdminService = {
 
     // 1. Update local notes
     const localNotes = getLocalNotes();
+    let updatedNoteObj: Note | null = null;
     const updatedLocal = localNotes.map((n) => {
-      if (n.id === noteId) {
-        return {
+      if (n.id === noteId || n.local_id === noteId) {
+        updatedNoteObj = {
           ...n,
           ...updates,
           updated_at: now,
         };
+        return updatedNoteObj;
       }
       return n;
     });
     saveLocalNotes(updatedLocal);
 
-    // 2. Update Firestore
+    // 2. Update in Global Cloud Catalog & push realtime event
     try {
-      await Promise.race([
-        updateDoc(doc(db, 'notes', noteId), {
+      const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
+      const target = cloudNotes.find((n) => n.id === noteId || n.local_id === noteId);
+      if (target) {
+        const merged: Note = {
+          ...target,
           ...updates,
           updated_at: now,
-        }),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+        };
+        await CloudShareService.syncNoteToGlobalCatalog(merged);
+        await CloudShareService.syncNoteToCloud(merged);
+      } else if (updatedNoteObj) {
+        await CloudShareService.syncNoteToGlobalCatalog(updatedNoteObj);
+        await CloudShareService.syncNoteToCloud(updatedNoteObj);
+      }
     } catch {}
 
     return { success: true };
@@ -483,15 +478,12 @@ export const AdminService = {
   async deleteNote(noteId: string): Promise<{ success: boolean; error?: string }> {
     // 1. Delete local
     const localNotes = getLocalNotes();
-    const filtered = localNotes.filter((n) => n.id !== noteId);
+    const filtered = localNotes.filter((n) => n.id !== noteId && n.local_id !== noteId);
     saveLocalNotes(filtered);
 
-    // 2. Delete Firestore
+    // 2. Delete from global cloud catalog & notify all screens
     try {
-      await Promise.race([
-        deleteDoc(doc(db, 'notes', noteId)),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      await CloudShareService.deleteNoteFromGlobalCatalog(noteId);
     } catch {}
 
     return { success: true };
@@ -502,50 +494,23 @@ export const AdminService = {
   // ----------------------------------------------------
   async getAllShares(): Promise<Array<NoteShare & { note_title?: string }>> {
     const sharesMap = new Map<string, NoteShare & { note_title?: string }>();
+    const allNotes = await this.getAllNotes();
 
-    // 1. From local notes
-    const localNotes = getLocalNotes();
-    for (const n of localNotes) {
-      if (n.share && n.share.custom_slug) {
-        sharesMap.set(n.share.custom_slug, {
+    for (const n of allNotes) {
+      if (n.share && (n.share.custom_slug || n.share.id)) {
+        const slug = n.share.custom_slug || n.share.id || n.id;
+        sharesMap.set(slug, {
           ...n.share,
+          id: n.share.id || n.id,
+          note_id: n.share.note_id || n.id,
+          custom_slug: slug,
           note_title: n.title || 'Sem título',
+          owner_user_id: n.share.owner_user_id || n.user_id,
+          owner_username: n.share.owner_username || n.owner_username,
+          allowed_users: n.share.allowed_users || [],
         });
       }
     }
-
-    // 2. From Firestore note_shares collection
-    try {
-      const snap = await Promise.race([
-        getDocs(collection(db, 'note_shares')),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800)),
-      ]);
-
-      if (snap && !snap.empty) {
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          if (data && (data.custom_slug || d.id)) {
-            const slug = data.custom_slug || d.id;
-            sharesMap.set(slug, {
-              id: data.id || d.id,
-              note_id: data.note_id || slug,
-              custom_slug: slug,
-              is_password_protected: Boolean(data.is_password_protected),
-              password_hash: data.password_hash,
-              password_salt: data.password_salt,
-              is_active: data.is_active !== false,
-              created_at: data.created_at || new Date().toISOString(),
-              updated_at: data.updated_at || new Date().toISOString(),
-              view_count: data.view_count || 0,
-              owner_token: data.owner_token,
-              owner_username: data.owner_username,
-              allowed_users: data.allowed_users || [],
-              note_title: data.note_title || sharesMap.get(slug)?.note_title || 'Nota Compartilhada',
-            });
-          }
-        });
-      }
-    } catch {}
 
     return Array.from(sharesMap.values()).sort(
       (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
@@ -586,7 +551,7 @@ export const AdminService = {
     const localNotes = getLocalNotes();
     let modifiedLocal = false;
     const updatedLocal = localNotes.map((n) => {
-      if (n.share && n.share.custom_slug === slug) {
+      if (n.share && (n.share.custom_slug === slug || n.share.id === slug || n.id === slug)) {
         modifiedLocal = true;
         return {
           ...n,
@@ -602,12 +567,25 @@ export const AdminService = {
       saveLocalNotes(updatedLocal);
     }
 
-    // Update in Firestore
+    // Update in Global Cloud Catalog
     try {
-      await Promise.race([
-        updateDoc(doc(db, 'note_shares', slug), updatePayload),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
+      const target = cloudNotes.find(
+        (n) => n.share && (n.share.custom_slug === slug || n.share.id === slug || n.id === slug)
+      );
+      if (target && target.share) {
+        const updatedShare: NoteShare = {
+          ...target.share,
+          ...updatePayload,
+        };
+        const updatedNote: Note = {
+          ...target,
+          share: updatedShare,
+          updated_at: now,
+        };
+        await CloudShareService.syncNoteToGlobalCatalog(updatedNote, updatedShare);
+        await CloudShareService.syncNoteToCloud(updatedNote, updatedShare);
+      }
     } catch {}
 
     return { success: true };
@@ -618,20 +596,29 @@ export const AdminService = {
     const localNotes = getLocalNotes();
     let modified = false;
     const updated = localNotes.map((n) => {
-      if (n.share && n.share.custom_slug === slug) {
+      if (n.share && (n.share.custom_slug === slug || n.share.id === slug || n.id === slug)) {
         modified = true;
-        return { ...n, share: null };
+        return { ...n, share: undefined };
       }
       return n;
     });
     if (modified) saveLocalNotes(updated);
 
-    // 2. Delete Firestore doc
+    // 2. Remove share in Global Catalog & Cloud
     try {
-      await Promise.race([
-        deleteDoc(doc(db, 'note_shares', slug)),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
+      const target = cloudNotes.find(
+        (n) => n.share && (n.share.custom_slug === slug || n.share.id === slug || n.id === slug)
+      );
+      if (target) {
+        const updatedNote: Note = {
+          ...target,
+          share: undefined,
+          updated_at: new Date().toISOString(),
+        };
+        await CloudShareService.syncNoteToGlobalCatalog(updatedNote, null);
+        await CloudShareService.syncNoteToCloud(updatedNote, null);
+      }
     } catch {}
 
     return { success: true };

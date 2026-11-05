@@ -6,6 +6,139 @@ const TELEGRAPH_API_URL = 'https://api.telegra.ph';
 const TELEGRAPH_DEFAULT_TOKEN = '58462b400e5834a86409addac7e876e3f1648478034b60f910f8a64c578e';
 const NTFY_BASE_URL = 'https://ntfy.sh';
 const CLOUD_IDS_STORAGE_KEY = '7notpad_cloud_paths_v2';
+const GLOBAL_NOTES_CATALOG_KEY = '7notpad_global_notes_catalog_v2';
+const GLOBAL_REALTIME_TOPIC = '7notpad_global_events_v2';
+const GLOBAL_CHANNEL_NAME = '7notpad_global_realtime_events';
+
+// Client Session ID to filter out self-echo in SSE pub/sub
+let clientSessionId = '';
+function getClientSessionId(): string {
+  if (!clientSessionId) {
+    try {
+      const stored = sessionStorage.getItem('7notpad_session_id');
+      if (stored) {
+        clientSessionId = stored;
+      } else {
+        clientSessionId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        sessionStorage.setItem('7notpad_session_id', clientSessionId);
+      }
+    } catch {
+      clientSessionId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    }
+  }
+  return clientSessionId;
+}
+
+let globalBroadcastChannel: BroadcastChannel | null = null;
+try {
+  if (typeof BroadcastChannel !== 'undefined') {
+    globalBroadcastChannel = new BroadcastChannel(GLOBAL_CHANNEL_NAME);
+  }
+} catch {}
+
+/**
+ * Publish global real-time event to all screens/devices via Ntfy SSE + local BroadcastChannel
+ */
+export function publishGlobalRealtimeEvent(payload: Record<string, any>): void {
+  const fullPayload = {
+    ...payload,
+    clientId: getClientSessionId(),
+    timestamp: Date.now(),
+  };
+
+  // 1. Instant local inter-tab broadcast (0ms delay)
+  try {
+    globalBroadcastChannel?.postMessage(fullPayload);
+  } catch {}
+
+  // 2. Cross-device and cross-network SSE pub/sub via Ntfy
+  try {
+    fetch(`${NTFY_BASE_URL}/${GLOBAL_REALTIME_TOPIC}`, {
+      method: 'POST',
+      body: JSON.stringify(fullPayload),
+      headers: {
+        'Title': payload.type || '7notpad_event',
+        'Priority': 'default',
+      },
+    }).catch(() => {});
+  } catch {}
+}
+
+/**
+ * Subscribe to global real-time events across all screens, tabs, and devices
+ */
+export function subscribeToGlobalRealtimeEvents(listener: (event: any) => void): () => void {
+  const myId = getClientSessionId();
+
+  // Local BroadcastChannel listener
+  const handleBc = (evt: MessageEvent) => {
+    if (evt.data && evt.data.clientId !== myId) {
+      try {
+        listener(evt.data);
+      } catch (err) {
+        console.warn('Broadcast listener warning:', err);
+      }
+    }
+  };
+
+  try {
+    globalBroadcastChannel?.addEventListener('message', handleBc);
+  } catch {}
+
+  // Cross-device SSE listener with auto-reconnect
+  let es: EventSource | null = null;
+  let reconnectTimer: any = null;
+  let isClosed = false;
+
+  const connect = () => {
+    if (isClosed || typeof EventSource === 'undefined') return;
+    try {
+      es = new EventSource(`${NTFY_BASE_URL}/${GLOBAL_REALTIME_TOPIC}/sse`);
+
+      es.onmessage = (event) => {
+        try {
+          if (!event.data) return;
+          const parsed = JSON.parse(event.data);
+          let messageData = parsed;
+          if (parsed.message && typeof parsed.message === 'string') {
+            try {
+              messageData = JSON.parse(parsed.message);
+            } catch {
+              messageData = parsed;
+            }
+          }
+          if (messageData && messageData.clientId !== myId) {
+            listener(messageData);
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        es?.close();
+        es = null;
+        if (!isClosed && !reconnectTimer) {
+          reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+          }, 3500);
+        }
+      };
+    } catch {}
+  };
+
+  connect();
+
+  return () => {
+    isClosed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    try {
+      globalBroadcastChannel?.removeEventListener('message', handleBc);
+    } catch {}
+    try {
+      es?.close();
+    } catch {}
+  };
+}
 
 // In-memory cache & serialization queues to prevent concurrent race conditions
 const memoryCloudPaths: Record<string, string> = {};
@@ -304,6 +437,10 @@ async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | nu
         : [];
 
     const savedPath = await saveCloudDocument(note.id, payload, extraKeys);
+
+    // Also sync to global catalog & broadcast real-time update
+    CloudShareService.syncNoteToGlobalCatalog(note, effectiveShare).catch(() => {});
+
     return Boolean(savedPath);
   } catch (err) {
     console.warn('CloudShareService.syncNoteToCloud warning:', err);
@@ -448,6 +585,13 @@ export const CloudShareService = {
         username: cleanUsername,
         full_name: user.full_name || cleanUsername,
       }).catch(() => {});
+
+      // Broadcast user updated to all screens in real time
+      publishGlobalRealtimeEvent({
+        type: 'user_updated',
+        userId: user.id,
+        username: cleanUsername,
+      });
     } catch (err) {
       console.warn('CloudShareService.syncGlobalUser warning:', err);
     }
@@ -488,7 +632,93 @@ export const CloudShareService = {
         const remainingDir = dirDoc.users.filter((u: any) => u.id !== userId);
         await saveCloudDocument(dirKey, { users: remainingDir });
       }
+
+      // Broadcast user deleted to all screens in real time
+      publishGlobalRealtimeEvent({
+        type: 'user_deleted',
+        userId,
+      });
     } catch {}
+  },
+
+  /**
+   * Real-time Pub/Sub helpers
+   */
+  publishGlobalRealtimeEvent,
+  subscribeToGlobalRealtimeEvents,
+
+  /**
+   * Fetch all notes stored in the global cloud catalog
+   */
+  async fetchAllNotesFromGlobalCatalog(): Promise<Note[]> {
+    try {
+      const doc = await fetchCloudDocument(GLOBAL_NOTES_CATALOG_KEY);
+      if (doc && Array.isArray(doc.notes)) {
+        return doc.notes;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Save or update a note in the global cloud catalog & notify real-time subscribers
+   */
+  async syncNoteToGlobalCatalog(note: Note, explicitShare?: NoteShare | null): Promise<void> {
+    try {
+      const existing = await this.fetchAllNotesFromGlobalCatalog();
+      const now = new Date().toISOString();
+      const effectiveShare: NoteShare | undefined = explicitShare ?? note.share ?? undefined;
+
+      const cleanNote: Note = {
+        ...note,
+        updated_at: note.updated_at || now,
+        share: effectiveShare,
+      };
+
+      const filtered = existing.filter(
+        (n) => n.id !== note.id && (note.local_id ? n.local_id !== note.local_id : true)
+      );
+      filtered.unshift(cleanNote);
+
+      await saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
+        notes: filtered,
+        updated_at: now,
+      });
+
+      publishGlobalRealtimeEvent({
+        type: 'note_updated',
+        noteId: note.id,
+        userId: note.user_id,
+        owner_username: note.owner_username,
+        title: note.title,
+      });
+    } catch (err) {
+      console.warn('CloudShareService.syncNoteToGlobalCatalog warning:', err);
+    }
+  },
+
+  /**
+   * Delete a note from the global cloud catalog & broadcast event
+   */
+  async deleteNoteFromGlobalCatalog(noteId: string): Promise<void> {
+    try {
+      const existing = await this.fetchAllNotesFromGlobalCatalog();
+      const filtered = existing.filter((n) => n.id !== noteId && n.local_id !== noteId);
+
+      await saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
+        notes: filtered,
+        updated_at: new Date().toISOString(),
+      });
+
+      publishGlobalRealtimeEvent({
+        type: 'note_deleted',
+        noteId,
+      });
+    } catch (err) {
+      console.warn('CloudShareService.deleteNoteFromGlobalCatalog warning:', err);
+    }
   },
 
   /**

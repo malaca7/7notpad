@@ -42,7 +42,7 @@ export function MainLayout() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [platformLimits, setPlatformLimits] = useState<PlatformLimits>(() => PlatformSettingsService.getLimits());
-  const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
   const [mobileCopiedLink, setMobileCopiedLink] = useState(false);
 
   // Sync and subscribe to platform limits

@@ -34,7 +34,7 @@ interface AuthModalProps {
   initialEmail?: string;
   resetToken?: string;
   onSuccess?: () => void;
-  onOpenSettings?: (tab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup') => void;
+  onOpenSettings?: (tab?: 'account' | 'editor' | 'cloud' | 'security' | 'backup') => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({

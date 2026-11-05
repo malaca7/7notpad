@@ -100,9 +100,18 @@ export function useNotes() {
       setNotes(freshLocal);
     });
 
+    // 2. Global Real-time Pub/Sub across all browsers and devices via Ntfy SSE
+    const unsubGlobal = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
+      if (event.type === 'note_updated' || event.type === 'note_deleted') {
+        if (pendingNoteRef.current || saveTimeoutRef.current) return;
+        loadNotes();
+      }
+    });
+
     return () => {
       unsubAuth();
       unsubRealtime();
+      unsubGlobal();
     };
   }, [loadNotes]);
 

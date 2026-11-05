@@ -243,68 +243,68 @@ export const StorageService = {
     const ownerToken = getOrCreateOwnerToken();
     const currentUser = AuthService.getCurrentUser();
     const currentUserId = userId || currentUser?.id;
-    const currentUsername = currentUser?.username;
-    const initialLocalNotes = getLocalNotes();
+    const currentUsername = currentUser?.username?.toLowerCase().replace(/^@+/, '');
+    const isAdmin = currentUser ? isUserAdmin(currentUser) : false;
+    const freshLocalNotes = getLocalNotes();
 
     try {
-      // 1. Trigger migration in background if not done yet (never block UI load!)
-      const isMigrated = localStorage.getItem(MIGRATED_FLAG_KEY);
-      if (!isMigrated && initialLocalNotes.length > 0) {
-        localStorage.setItem(MIGRATED_FLAG_KEY, 'true');
-        const localShares = getLocalShares();
-        FirebaseService.migrateLocalData(initialLocalNotes, localShares).catch(() => {});
+      // 1. Fetch fresh notes from CloudShareService Global Catalog (cross-device/all users)
+      const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
+
+      let relevantRemoteNotes: Note[] = [];
+      if (Array.isArray(cloudNotes) && cloudNotes.length > 0) {
+        relevantRemoteNotes = cloudNotes.filter((n) => {
+          if (!n) return false;
+          // Anonymous visitor
+          if (!currentUserId && !currentUsername) {
+            return n.owner_token === ownerToken;
+          }
+          // Admin sees all notes
+          if (isAdmin) {
+            return true;
+          }
+          // Note owner by user_id, token, or owner_username
+          if (n.user_id && n.user_id === currentUserId) return true;
+          if (n.owner_token && n.owner_token === ownerToken) return true;
+          if (n.owner_username && n.owner_username.toLowerCase().replace(/^@+/, '') === currentUsername) return true;
+
+          // Note shared directly with this user
+          if (n.share?.allowed_users?.some((u) => u.username.toLowerCase().replace(/^@+/, '') === currentUsername)) {
+            return true;
+          }
+          return false;
+        });
       }
 
-      // 2. Fetch fresh notes from Firebase (protected by timeout in FirebaseService)
-      const remoteNotes = await FirebaseService.fetchNotes(ownerToken, currentUserId, currentUsername);
-
-      // Always read the latest local notes AFTER the async call so we never overwrite notes created/edited while loading!
-      const freshLocalNotes = getLocalNotes();
-
-      if (remoteNotes && remoteNotes.length > 0) {
-        // Merge remote notes with fresh local notes (prefer newest updated_at)
-        const mergedMap = new Map<string, Note>();
-        for (const n of freshLocalNotes) {
+      // Merge remote notes with fresh local notes (prefer newest updated_at)
+      const mergedMap = new Map<string, Note>();
+      for (const n of freshLocalNotes) {
+        mergedMap.set(n.id, n);
+      }
+      for (const n of relevantRemoteNotes) {
+        const local = mergedMap.get(n.id);
+        if (!local || new Date(n.updated_at).getTime() > new Date(local.updated_at).getTime()) {
           mergedMap.set(n.id, n);
         }
-        for (const n of remoteNotes) {
-          const local = mergedMap.get(n.id);
-          if (!local || new Date(n.updated_at).getTime() > new Date(local.updated_at).getTime()) {
-            mergedMap.set(n.id, n);
-          }
-        }
+      }
 
-        const mergedNotes = Array.from(mergedMap.values()).sort(
-          (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
-        );
+      const mergedNotes = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+      );
 
-        saveLocalNotes(mergedNotes);
-        return mergedNotes;
-      } else if (freshLocalNotes.length > 0) {
-        // Sync local notes to Cloud & Firebase in background (non-blocking)
-        const allLocalShares = getLocalShares();
-        let updatedLocally = false;
-        for (const localNote of freshLocalNotes) {
-          if (currentUserId && !localNote.user_id) {
-            localNote.user_id = currentUserId;
-            updatedLocally = true;
-          }
-          const matchedShare =
-            localNote.share ||
-            allLocalShares[localNote.id] ||
-            Object.values(allLocalShares).find((s) => s.note_id === localNote.id) ||
-            null;
-          FirebaseService.saveNote(localNote).catch(() => {});
-          CloudShareService.syncNoteToCloud(localNote, matchedShare).catch(() => {});
-        }
-        if (updatedLocally) {
-          saveLocalNotes(freshLocalNotes);
+      saveLocalNotes(mergedNotes);
+
+      // If local notes exist that aren't in cloud catalog yet, sync them non-blocking
+      for (const localNote of freshLocalNotes) {
+        if (!cloudNotes.some(cn => cn.id === localNote.id)) {
+          CloudShareService.syncNoteToCloud(localNote).catch(() => {});
+          CloudShareService.syncNoteToGlobalCatalog(localNote).catch(() => {});
         }
       }
 
-      return freshLocalNotes;
+      return mergedNotes;
     } catch (err) {
-      console.warn('Network or Firebase failure, using local notes:', err);
+      console.warn('Global catalog fetch warning, fallback to local notes:', err);
       return getLocalNotes();
     }
   },
@@ -348,8 +348,17 @@ export const StorageService = {
     }
     saveLocalNotes(localNotes);
 
-    // 2. Push to Cloud & Firebase Firestore in background (non-blocking so UI never hangs on "Salvando...")
+    // 2. Push to Cloud (both individual doc & global catalog & realtime event)
     CloudShareService.syncNoteToCloud(updatedNote).catch(() => {});
+    CloudShareService.syncNoteToGlobalCatalog(updatedNote).catch(() => {});
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'note_updated',
+      noteId: updatedNote.id,
+      userId: updatedNote.user_id,
+      owner_username: updatedNote.owner_username,
+      title: updatedNote.title,
+    });
+    notifyRealtimeSubscribers({ type: 'note_updated', noteId: updatedNote.id });
     FirebaseService.saveNote(updatedNote).catch((err) => {
       console.warn('Firebase background saveNote warning:', err);
     });
@@ -420,8 +429,15 @@ export const StorageService = {
 
     activeCloudProtectedContent = { slug: params.slug, content: params.content };
 
-    // 2. Sync to global CloudShareService & Firebase so all browsers/members see the edit immediately
+    // 2. Sync to global CloudShareService & Global Catalog so all browsers/members see the edit immediately
     await CloudShareService.syncNoteToCloud(noteObj, updatedShare);
+    await CloudShareService.syncNoteToGlobalCatalog(noteObj, updatedShare);
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'note_updated',
+      noteId: noteObj.id,
+      slug: params.slug,
+      title: noteObj.title,
+    });
     FirebaseService.saveNote(noteObj).catch(() => {});
     FirebaseService.saveShare(updatedShare, noteObj).catch(() => {});
     notifyRealtimeSubscribers({ type: 'note_updated', noteId: noteObj.id, slug: params.slug });
@@ -448,7 +464,15 @@ export const StorageService = {
       saveLocalShares(updatedShares);
     }
 
-    // 2. Delete from Firebase in background
+    // 2. Delete from Global Catalog & broadcast
+    CloudShareService.deleteNoteFromGlobalCatalog(noteId).catch(() => {});
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'note_deleted',
+      noteId,
+    });
+    notifyRealtimeSubscribers({ type: 'note_deleted', noteId });
+
+    // Delete from Firebase in background
     FirebaseService.deleteNote(noteId).catch((err) => {
       console.warn('Firebase delete note error:', err);
     });
@@ -470,8 +494,15 @@ export const StorageService = {
       note.share = share;
       saveLocalNotes(localNotes);
 
-      // 2. Sync to CloudShareService & Firebase so /notpad/<ID> works across browsers without #data=
+      // 2. Sync to CloudShareService & Global Catalog so /notpad/<ID> works across browsers without #data=
       await CloudShareService.syncNoteToCloud(note, share);
+      await CloudShareService.syncNoteToGlobalCatalog(note, share);
+      CloudShareService.publishGlobalRealtimeEvent({
+        type: 'note_updated',
+        noteId: note.id,
+        slug: share.custom_slug,
+        title: note.title,
+      });
 
       const res = await FirebaseService.saveShare(share, note);
       if (!res.success && res.error?.includes('já está em uso')) {

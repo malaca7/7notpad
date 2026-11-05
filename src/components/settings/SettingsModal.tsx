@@ -5,8 +5,6 @@ import { getOrCreateOwnerToken } from '../../lib/crypto';
 import { exportNotesToJson, importNotesFromJson } from '../../lib/exportImport';
 import { StorageService } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
-import { EmailService, getEmailConfig, saveEmailConfig, resolveEffectiveEmailConfig, DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID, DEFAULT_APPS_SCRIPT_URL } from '../../lib/emailService';
-import type { EmailProviderConfig } from '../../types/auth';
 import { SECURITY_QUESTIONS } from '../../types/auth';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../common/Toast';
@@ -25,16 +23,13 @@ import {
   CheckCircle2,
   User,
   AtSign,
-  Mail,
   Lock,
   LogOut,
   ShieldCheck,
   Eye,
   EyeOff,
   Sparkles,
-  Send,
   HelpCircle,
-  ExternalLink,
   Calendar,
   Camera,
   Trash2
@@ -44,7 +39,7 @@ interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onNotesImported?: () => void;
-  initialTab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup';
+  initialTab?: 'account' | 'editor' | 'cloud' | 'security' | 'backup';
   onOpenAuthModal?: () => void;
 }
 
@@ -59,16 +54,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { success, error } = useToast();
   const { user, isAuthenticated, logout } = useAuth();
 
-  const [activeTab, setActiveTab] = useState<'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>(initialTab);
   const [copiedToken, setCopiedToken] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [isSyncingNotesToUser, setIsSyncingNotesToUser] = useState(false);
-
-  // Email Config states
-  const [emailConfig, setEmailConfig] = useState<EmailProviderConfig>(() => getEmailConfig());
-  const [testEmailAddress, setTestEmailAddress] = useState(user?.email || 'malaca7x@gmail.com');
-  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
-  const [showAppsScriptGuide, setShowAppsScriptGuide] = useState(true);
 
   // Profile Edit states
   const [fullNameInput, setFullNameInput] = useState('');
@@ -104,9 +93,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
-    }
-    if (isOpen) {
-      resolveEffectiveEmailConfig().then(cfg => setEmailConfig(cfg)).catch(() => {});
     }
   }, [initialTab, isOpen]);
 
@@ -354,105 +340,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  // ----------------------------------------------------
-  // EMAIL SETTINGS HANDLERS
-  // ----------------------------------------------------
-  const handleSaveEmailConfig = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    saveEmailConfig(emailConfig);
-    success('Configuração Salva!', `Provedor de envio definido como ${emailConfig.provider.toUpperCase()}.`);
-  };
-
-  const handleSendTestEmail = async () => {
-    if (!testEmailAddress || !testEmailAddress.includes('@')) {
-      error('E-mail inválido', 'Informe um endereço de e-mail válido para receber o teste.');
-      return;
-    }
-
-    setIsSendingTestEmail(true);
-    try {
-      saveEmailConfig(emailConfig);
-      const res = await EmailService.sendTestEmail({
-        to: testEmailAddress,
-        fullName: user?.full_name || 'Usuário 7NotPad'
-      });
-
-      if (res.success) {
-        success(
-          'E-mail de Teste Disparado!',
-          `Código emitido: ${res.testCode}. Verifique sua Caixa de Entrada / Spam ou o aviso na tela.`
-        );
-      } else {
-        error(
-          'Falha no envio do teste',
-          res.error || 'Não foi possível entregar o e-mail via provedor externo. Verifique sua chave API ou Webhook.'
-        );
-      }
-    } catch (err: any) {
-      error('Erro ao enviar teste', err?.message || 'Falha inesperada.');
-    } finally {
-      setIsSendingTestEmail(false);
-    }
-  };
-
-  const appsScriptCode = `// 1. Clique em "Executar" (▷) com esta função selecionada para autorizar o Gmail:
-function autorizarETestarEmail() {
-  var email = Session.getActiveUser().getEmail() || "malacarogeriojr@gmail.com";
-  MailApp.sendEmail({
-    to: email,
-    subject: "7NotPad — Permissao do Gmail Autorizada!",
-    body: "Seu Google Apps Script do 7NotPad esta autorizado e pronto para enviar codigos de 6 digitos."
-  });
-}
-
-function doGet(e) {
-  return processarEnvio(e);
-}
-
-function doPost(e) {
-  return processarEnvio(e);
-}
-
-function processarEnvio(e) {
-  try {
-    var data = {};
-    if (e && e.postData && e.postData.contents) {
-      data = JSON.parse(e.postData.contents);
-    } else if (e && e.parameter) {
-      data = e.parameter;
-    }
-
-    var to = data.to;
-    if (!to) {
-      return ContentService
-        .createTextOutput(JSON.stringify({ success: false, error: "Destinatario (to) ausente" }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    var subject = data.subject || "7NotPad — Codigo de Confirmacao";
-    var body = data.text || (data.code ? "Seu codigo de verificacao de 6 digitos do 7NotPad e: " + data.code : "Notificacao 7NotPad");
-    var htmlBody = data.html || "";
-
-    var options = { to: to, subject: subject, body: body };
-    if (htmlBody) options.htmlBody = htmlBody;
-
-    MailApp.sendEmail(options);
-
-    return ContentService
-      .createTextOutput(JSON.stringify({ success: true, message: "E-mail enviado pelo Gmail para " + to }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ success: false, error: error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
-  const handleCopyAppsScript = () => {
-    navigator.clipboard.writeText(appsScriptCode);
-    success('Script copiado!', 'Cole o código no seu projeto do Google Apps Script.');
-  };
-
   return (
     <Modal
       isOpen={isOpen}
@@ -487,20 +374,6 @@ function processarEnvio(e) {
             Minha Conta
             {isAuthenticated && (
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('email')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${
-              activeTab === 'email'
-                ? 'border-brand-500 text-brand-500'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-          >
-            <Mail className="w-3.5 h-3.5" />
-            Serviço de E-mail
-            {emailConfig.provider !== 'simulated' && (
-              <span className="w-2 h-2 rounded-full bg-emerald-500 ml-0.5" />
             )}
           </button>
           <button
@@ -915,416 +788,6 @@ function processarEnvio(e) {
 
         {/* ==================================================== */}
         {/* TAB: SERVIÇO DE E-MAIL (ENVIO REAL DE CONFIRMAÇÃO)   */}
-        {/* ==================================================== */}
-        {activeTab === 'email' && (
-          <div className="space-y-6">
-            {/* Header info */}
-            <div className="p-4 rounded-2xl bg-brand-500/10 border border-brand-500/20 space-y-2">
-              <div className="flex items-center gap-2 text-brand-400 font-bold text-xs uppercase tracking-wider">
-                <Mail className="w-4 h-4" />
-                Entrega de E-mails Transacionais
-              </div>
-              <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-                Como o 7NotPad é hospedado como aplicação estática (GitHub Pages), o navegador não pode abrir conexões diretas via portas SMTP convencionais. Para receber os códigos de 6 dígitos e links de recuperação diretamente na sua caixa de entrada do Gmail, selecione e configure um provedor abaixo:
-              </p>
-            </div>
-
-            {/* Provider Selector Cards */}
-            <div className="space-y-2.5">
-              <label className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
-                Selecione a API de Envio (Sincronizada em Todos os Navegadores)
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* 1. EmailJS (Easiest API) */}
-                <button
-                  type="button"
-                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'emailjs' }))}
-                  className={`p-3.5 rounded-xl border text-left transition-all relative ${
-                    emailConfig.provider === 'emailjs'
-                      ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
-                      : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>EmailJS API</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 font-bold">Mais Fácil • 1 Clique</span>
-                    </span>
-                    {emailConfig.provider === 'emailjs' && <Check className="w-4 h-4 text-brand-400" />}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Feito para sites estáticos (GitHub Pages). Conecta seu Gmail em 1 clique sem scripts ou bloqueios de CORS.
-                  </p>
-                </button>
-
-                {/* 2. Brevo (Only 1 API Key) */}
-                <button
-                  type="button"
-                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'brevo' }))}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
-                    emailConfig.provider === 'brevo'
-                      ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
-                      : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Brevo REST API</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-blue-500/20 text-blue-400 font-bold">Só 1 Chave • 300/dia</span>
-                    </span>
-                    {emailConfig.provider === 'brevo' && <Check className="w-4 h-4 text-brand-400" />}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Usa apenas 1 chave API (xkeysib-...) e envia o e-mail HTML completo direto pelo navegador.
-                  </p>
-                </button>
-
-                {/* 3. Modo Instantâneo / Em Tela */}
-                <button
-                  type="button"
-                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'simulated' }))}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
-                    emailConfig.provider === 'simulated'
-                      ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
-                      : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Código Instantâneo em Tela</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 font-bold">Zero Configuração</span>
-                    </span>
-                    {emailConfig.provider === 'simulated' && <Check className="w-4 h-4 text-brand-400" />}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Gera o código de 6 dígitos na hora com botão "Preencher e Confirmar" em 1 clique.
-                  </p>
-                </button>
-
-                {/* 4. Webhook / Outros */}
-                <button
-                  type="button"
-                  onClick={() => setEmailConfig(prev => ({ ...prev, provider: 'webhook' }))}
-                  className={`p-3.5 rounded-xl border text-left transition-all ${
-                    emailConfig.provider === 'webhook'
-                      ? 'border-brand-500 bg-brand-500/10 shadow-sm shadow-brand-500/20 ring-1 ring-brand-500/50'
-                      : 'border-gray-200 dark:border-[#232838] bg-white dark:bg-[#12141c] hover:border-gray-300'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-                      <span>Webhook / Apps Script</span>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] bg-purple-500/20 text-purple-400 font-bold">Avançado</span>
-                    </span>
-                    {emailConfig.provider === 'webhook' && <Check className="w-4 h-4 text-brand-400" />}
-                  </div>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-normal">
-                    Integre qualquer endpoint HTTP POST próprio, Make, n8n ou Google Apps Script.
-                  </p>
-                </button>
-              </div>
-            </div>
-
-            {/* Config Fields depending on Provider */}
-            <form onSubmit={handleSaveEmailConfig} className="p-4 rounded-2xl bg-white dark:bg-[#0f1118] border border-gray-200 dark:border-[#232838] space-y-4">
-              {emailConfig.provider === 'emailjs' && (
-                <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                        <Sparkles className="w-4 h-4" />
-                        Como pegar os 3 dados grátis no EmailJS (leva 1 minuto):
-                      </span>
-                      <a
-                        href="https://dashboard.emailjs.com/admin"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px] text-brand-400 hover:underline flex items-center gap-1 font-semibold"
-                      >
-                        Abrir Painel EmailJS <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                    <ol className="list-decimal list-inside text-[11px] text-gray-600 dark:text-gray-300 space-y-1">
-                      <li>Crie conta grátis em <strong>emailjs.com</strong> e em <strong>Email Services</strong> clique em <em>Add New Service &rarr; Gmail</em> (copie o <strong>Service ID</strong>).</li>
-                      <li>Em <strong>Email Templates</strong>, crie um template colocando <code>{`{{to_email}}`}</code> no campo <em>To Email</em> e <code>{`{{code}}`}</code> no texto do e-mail (copie o <strong>Template ID</strong>).</li>
-                      <li>Em <strong>Account &rarr; General</strong>, copie a sua <strong>Public Key</strong> e cole abaixo:</li>
-                    </ol>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                        Public Key (Account)
-                      </label>
-                      <input
-                        type="text"
-                        value={emailConfig.emailjsPublicKey || ''}
-                        onChange={e => setEmailConfig(prev => ({ ...prev, emailjsPublicKey: e.target.value }))}
-                        placeholder="ex: aBcDeFgHiJkLmNoPq"
-                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                        Service ID
-                      </label>
-                      <input
-                        type="text"
-                        value={emailConfig.emailjsServiceId || ''}
-                        onChange={e => setEmailConfig(prev => ({ ...prev, emailjsServiceId: e.target.value }))}
-                        placeholder="ex: service_xxxxxxx"
-                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                        Template ID
-                      </label>
-                      <input
-                        type="text"
-                        value={emailConfig.emailjsTemplateId || ''}
-                        onChange={e => setEmailConfig(prev => ({ ...prev, emailjsTemplateId: e.target.value }))}
-                        placeholder="ex: template_xxxxxxx"
-                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {emailConfig.provider === 'webhook' && (
-                <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col gap-1 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                        <CheckCircle2 className="w-4 h-4" />
-                        Google Apps Script Configurado e Ativo
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setEmailConfig({ provider: 'webhook', webhookUrl: DEFAULT_APPS_SCRIPT_URL })}
-                        className="text-[10px] text-emerald-400 hover:underline font-medium"
-                      >
-                        Restaurar URL Padrão
-                      </button>
-                    </div>
-                    <div className="text-[11px] text-gray-500 dark:text-gray-400 font-mono break-all">
-                      ID da Implantação: {DEFAULT_APPS_SCRIPT_DEPLOYMENT_ID}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                      URL do App da Web (Google Apps Script)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowAppsScriptGuide(!showAppsScriptGuide)}
-                      className="text-[11px] text-brand-400 hover:underline flex items-center gap-1 font-medium"
-                    >
-                      <HelpCircle className="w-3.5 h-3.5" />
-                      {showAppsScriptGuide ? 'Ocultar Tutorial' : 'Ver Código / Tutorial'}
-                    </button>
-                  </div>
-
-                  <input
-                    type="url"
-                    value={emailConfig.webhookUrl || DEFAULT_APPS_SCRIPT_URL}
-                    onChange={e => setEmailConfig(prev => ({ ...prev, webhookUrl: e.target.value }))}
-                    placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
-                    className="w-full px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                  />
-
-                  {showAppsScriptGuide && (
-                    <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-700/80 text-slate-200 text-xs space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-white flex items-center gap-1.5">
-                          <Sparkles className="w-4 h-4 text-brand-400" />
-                          Passo a Passo (Google Apps Script Grátis):
-                        </span>
-                        <a
-                          href="https://script.google.com/home"
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[11px] text-brand-400 hover:underline flex items-center gap-1"
-                        >
-                          Abrir Apps Script <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                      <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-300">
-                        <li>Acesse <strong>script.google.com</strong> e clique em <strong>+ Novo Projeto</strong>.</li>
-                        <li>Apague todo o código que estiver lá e cole o código abaixo:</li>
-                      </ol>
-
-                      <div className="relative">
-                        <pre className="p-3 rounded-lg bg-black/60 border border-slate-800 text-[10px] font-mono text-emerald-400 overflow-x-auto max-h-40">
-                          {appsScriptCode}
-                        </pre>
-                        <button
-                          type="button"
-                          onClick={handleCopyAppsScript}
-                          className="absolute right-2 top-2 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-white text-[10px] font-semibold border border-slate-700"
-                        >
-                          Copiar Código
-                        </button>
-                      </div>
-
-                      <ol start={3} className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-300">
-                        <li>No topo do Apps Script, clique em <strong>▷ Executar</strong> (com <code>autorizarETestarEmail</code> selecionado) e aceite as permissões da sua conta Gmail (<em>Revisar permissões &rarr; Avançado &rarr; Acessar projeto</em>).</li>
-                        <li>Clique em <strong>Implantar</strong> &rarr; <strong>Gerenciar implantações</strong> &rarr; ícone de <strong>Lápis (Editar)</strong>.</li>
-                        <li>Em <em>Versão</em>, escolha <strong>Nova versão</strong> (muito importante!).</li>
-                        <li>Em <em>Quem pode acessar</em>, selecione <strong>Qualquer pessoa (Anyone)</strong> e clique em <strong>Implantar</strong>.</li>
-                      </ol>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {emailConfig.provider === 'brevo' && (
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                        Chave API do Brevo (API Key)
-                      </label>
-                      <a
-                        href="https://app.brevo.com/settings/keys/api"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px] text-brand-400 hover:underline flex items-center gap-1"
-                      >
-                        Obter chave no Brevo <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                    <input
-                      type="password"
-                      value={emailConfig.brevoApiKey || ''}
-                      onChange={e => setEmailConfig(prev => ({ ...prev, brevoApiKey: e.target.value }))}
-                      placeholder="xkeysib-..."
-                      className="w-full px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                        E-mail de Remetente (cadastrado no Brevo)
-                      </label>
-                      <input
-                        type="email"
-                        value={emailConfig.brevoSenderEmail || ''}
-                        onChange={e => setEmailConfig(prev => ({ ...prev, brevoSenderEmail: e.target.value }))}
-                        placeholder="seu-email@dominio.com"
-                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs text-gray-900 dark:text-gray-100 outline-none"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                        Nome do Remetente
-                      </label>
-                      <input
-                        type="text"
-                        value={emailConfig.brevoSenderName || '7NotPad'}
-                        onChange={e => setEmailConfig(prev => ({ ...prev, brevoSenderName: e.target.value }))}
-                        placeholder="7NotPad"
-                        className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs text-gray-900 dark:text-gray-100 outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {emailConfig.provider === 'resend' && (
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                        Chave API do Resend (API Key)
-                      </label>
-                      <a
-                        href="https://resend.com/api-keys"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px] text-brand-400 hover:underline flex items-center gap-1"
-                      >
-                        Obter chave no Resend <ExternalLink className="w-3 h-3" />
-                      </a>
-                    </div>
-                    <input
-                      type="password"
-                      value={emailConfig.resendApiKey || ''}
-                      onChange={e => setEmailConfig(prev => ({ ...prev, resendApiKey: e.target.value }))}
-                      placeholder="re_..."
-                      className="w-full px-3 py-2.5 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs font-mono text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-gray-700 dark:text-gray-300">
-                      Remetente (From)
-                    </label>
-                    <input
-                      type="text"
-                      value={emailConfig.resendFromEmail || '7NotPad <onboarding@resend.dev>'}
-                      onChange={e => setEmailConfig(prev => ({ ...prev, resendFromEmail: e.target.value }))}
-                      placeholder="7NotPad <onboarding@resend.dev>"
-                      className="w-full px-3 py-2 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] text-xs text-gray-900 dark:text-gray-100 outline-none"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {emailConfig.provider === 'simulated' && (
-                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 leading-relaxed">
-                  <strong>Modo Simulado Ativo:</strong> Nenhum serviço externo é chamado. Toda vez que um código de 6 dígitos é emitido (cadastro ou redefinição de senha), ele é exibido automaticamente no canto da tela com botão de copiar para facilitar testes imediatos.
-                </div>
-              )}
-
-              <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md shadow-brand-600/20 transition-all flex items-center gap-1.5"
-                >
-                  <Check className="w-3.5 h-3.5" />
-                  Salvar Configuração de E-mail
-                </button>
-              </div>
-            </form>
-
-            {/* Test Email Section */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-900 dark:text-gray-100">
-                <Send className="w-4 h-4 text-brand-400" />
-                Testar Envio Imediato
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Dispare um e-mail de teste com código de 6 dígitos para verificar se a entrega está funcionando diretamente para a sua caixa de entrada.
-              </p>
-
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                <input
-                  type="email"
-                  value={testEmailAddress}
-                  onChange={e => setTestEmailAddress(e.target.value)}
-                  placeholder="malaca7x@gmail.com"
-                  className="flex-1 px-3 py-2.5 rounded-xl bg-white dark:bg-[#0f1118] border border-gray-200 dark:border-[#232838] text-xs text-gray-900 dark:text-gray-100 outline-none focus:border-brand-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleSendTestEmail}
-                  disabled={isSendingTestEmail}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <Send className={`w-3.5 h-3.5 ${isSendingTestEmail ? 'animate-bounce' : ''}`} />
-                  <span>{isSendingTestEmail ? 'Enviando...' : 'Enviar E-mail de Teste'}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Tab 2: Editor Appearance */}
         {activeTab === 'editor' && (
           <div className="space-y-4">

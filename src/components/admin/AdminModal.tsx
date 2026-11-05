@@ -25,6 +25,7 @@ import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { useToast } from '../common/Toast';
 import { AdminService, type AdminStats } from '../../lib/adminService';
+import { CloudShareService } from '../../lib/cloudShare';
 import { PlatformSettingsService, type PlatformLimits } from '../../lib/platformSettings';
 import type { UserProfile, UserRole } from '../../types/auth';
 import type { Note, NoteShare } from '../../types/note';
@@ -67,7 +68,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [newFullName, setNewFullName] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('user');
   const [isSubmittingUser, setIsSubmittingUser] = useState(false);
 
@@ -127,9 +127,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) return;
+    loadAdminData();
+
+    // Auto-sync in real time whenever any user creates/edits notes or accounts across the platform
+    const unsub = CloudShareService.subscribeToGlobalRealtimeEvents(() => {
       loadAdminData();
-    }
+    });
+
+    const handleFocus = () => {
+      loadAdminData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      unsub();
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [isOpen]);
 
   // Filtered Users
@@ -139,8 +153,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       const matchSearch =
         !q ||
         u.full_name.toLowerCase().includes(q) ||
-        u.username.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q);
+        u.username.toLowerCase().includes(q);
 
       if (!matchSearch) return false;
 
@@ -184,11 +197,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
     setIsSubmittingUser(true);
     try {
+      const cleanUsername = newUsername.trim().toLowerCase().replace(/^@+/, '');
       const res = await AdminService.createUser({
-        full_name: newFullName,
-        username: newUsername,
+        full_name: newFullName.trim(),
+        username: cleanUsername,
         password: newPassword,
-        email: newEmail,
+        email: `${cleanUsername}@7notpad.local`,
         role: newRole,
       });
       if (res.success && res.user) {
@@ -197,7 +211,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         setNewFullName('');
         setNewUsername('');
         setNewPassword('');
-        setNewEmail('');
         setNewRole('user');
         loadAdminData();
       } else {
@@ -634,7 +647,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                   type="text"
                   value={userSearch}
                   onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Pesquisar por nome, @username ou e-mail..."
+                  placeholder="Pesquisar por nome ou @username..."
                   className="w-full bg-transparent text-xs text-gray-100 placeholder:text-gray-500 outline-none"
                 />
               </div>
@@ -725,7 +738,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               )}
                             </div>
                             <div className="text-[11px] text-gray-500 mt-0.5">
-                              {u.email} • Cadastro em {new Date(u.created_at).toLocaleDateString('pt-BR')}
+                              ID: {u.id} • Cadastro em {new Date(u.created_at).toLocaleDateString('pt-BR')}
                             </div>
                           </div>
                         </div>
@@ -1194,17 +1207,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               placeholder="••••••••"
-              className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-300">E-mail (opcional)</label>
-            <input
-              type="email"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              placeholder="email@dominio.com"
               className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
             />
           </div>

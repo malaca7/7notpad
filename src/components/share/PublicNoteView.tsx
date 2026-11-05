@@ -8,6 +8,7 @@ import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 
 import { StorageService, subscribeToRealtimeSync, hasDirectNoteAccess } from '../../lib/storage';
+import { CloudShareService } from '../../lib/cloudShare';
 import { AuthService, subscribeToAuth } from '../../lib/authService';
 import { verifyPassword } from '../../lib/crypto';
 import type { NoteShare, Attachment } from '../../types/note';
@@ -327,14 +328,27 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
       syncPublicNoteState(false);
     });
 
-    // 2. Live cloud polling every 2.5s when tab is visible for visitors across any browser/device
+    // 2. Global Real-time Pub/Sub across all browsers and devices via Ntfy SSE
+    const unsubGlobal = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
+      if (
+        event.type === 'note_updated' &&
+        (event.noteId === slug ||
+          event.slug === slug ||
+          event.noteId === latestNoteIdRef.current)
+      ) {
+        if (Date.now() - lastLocalEditTimeRef.current < 1500) return;
+        syncPublicNoteState(false);
+      }
+    });
+
+    // 3. Live cloud polling every 2.5s when tab is visible for visitors across any browser/device
     const pollInterval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         syncPublicNoteState(false);
       }
     }, 2500);
 
-    // 3. Immediate sync on tab focus / visibility change
+    // 4. Immediate sync on tab focus / visibility change
     const handleFocus = () => syncPublicNoteState(false);
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
@@ -347,6 +361,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
     return () => {
       unsubRealtime();
       unsubAuth();
+      unsubGlobal();
       clearInterval(pollInterval);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibility);

@@ -19,7 +19,7 @@ import { exportNotesToJson } from '../../lib/exportImport';
 
 interface NavbarProps {
   onToggleMobileSidebar: () => void;
-  onOpenSettings: (tab?: 'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup') => void;
+  onOpenSettings: (tab?: 'account' | 'editor' | 'cloud' | 'security' | 'backup') => void;
   onOpenAuthModal: () => void;
   totalNotes: number;
   onGoToDashboard?: () => void;
