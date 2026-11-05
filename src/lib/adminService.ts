@@ -9,8 +9,8 @@ import {
 import { db } from './firebase';
 import { type StoredUser } from './authService';
 import { CloudShareService } from './cloudShare';
-import { generateSalt, hashPassword } from './crypto';
-import { getLocalNotes, saveLocalNotes } from './storage';
+import { generateSalt, hashPassword, getOrCreateOwnerToken } from './crypto';
+import { getLocalNotes, saveLocalNotes, getLocalShares, saveLocalShares } from './storage';
 import { PlatformSettingsService, type PlatformLimits } from './platformSettings';
 import type { UserProfile, UserRole } from '../types/auth';
 import type { Note, NoteShare } from '../types/note';
@@ -433,43 +433,226 @@ export const AdminService = {
     );
   },
 
+  async createNote(params: {
+    title: string;
+    content?: string;
+    owner_username?: string;
+    user_id?: string;
+    is_pinned?: boolean;
+    share_slug?: string;
+    share_password?: string;
+  }): Promise<{ success: boolean; note?: Note; error?: string }> {
+    const now = new Date().toISOString();
+    const noteId = crypto.randomUUID();
+    const ownerToken = getOrCreateOwnerToken();
+
+    const cleanUsername = params.owner_username?.trim().toLowerCase().replace(/^@+/, '') || 'malaca';
+    let targetUserId = params.user_id;
+
+    if (!targetUserId) {
+      const allUsers = await this.getAllUsers();
+      const match = allUsers.find((u) => u.username.toLowerCase() === cleanUsername);
+      targetUserId = match?.id || `usr_${cleanUsername}`;
+    }
+
+    let share: NoteShare | null = null;
+    if (params.share_slug && params.share_slug.trim()) {
+      const cleanSlug = params.share_slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      let password_hash: string | undefined;
+      let password_salt: string | undefined;
+
+      if (params.share_password && params.share_password.trim()) {
+        password_salt = generateSalt();
+        password_hash = await hashPassword(params.share_password.trim(), password_salt);
+      }
+
+      share = {
+        id: crypto.randomUUID(),
+        note_id: noteId,
+        custom_slug: cleanSlug,
+        is_password_protected: Boolean(params.share_password && params.share_password.trim()),
+        password_hash,
+        password_salt,
+        is_active: true,
+        created_at: now,
+        updated_at: now,
+        owner_token: ownerToken,
+        owner_user_id: targetUserId,
+        owner_username: cleanUsername,
+        allowed_users: [],
+      };
+
+      const shares = getLocalShares();
+      shares[cleanSlug] = share;
+      shares[noteId] = share;
+      saveLocalShares(shares);
+    }
+
+    const newNote: Note = {
+      id: noteId,
+      local_id: noteId,
+      title: params.title.trim() || 'Sem título',
+      content: params.content || '',
+      created_at: now,
+      updated_at: now,
+      owner_token: ownerToken,
+      user_id: targetUserId,
+      owner_username: cleanUsername,
+      is_pinned: Boolean(params.is_pinned),
+      attachments: [],
+      share,
+    };
+
+    // 1. Save to local storage
+    const localNotes = getLocalNotes();
+    saveLocalNotes([newNote, ...localNotes]);
+
+    // 2. Sync to cloud and global catalog
+    try {
+      await CloudShareService.syncNoteToCloud(newNote, share);
+      await CloudShareService.syncNoteToGlobalCatalog(newNote, share);
+      CloudShareService.publishGlobalRealtimeEvent({
+        type: 'note_updated',
+        noteId: newNote.id,
+        title: newNote.title,
+        owner_username: newNote.owner_username,
+        user_id: newNote.user_id,
+      });
+    } catch (err) {
+      console.warn('AdminService.createNote cloud sync warning:', err);
+    }
+
+    // 3. Sync to Firestore non-blocking
+    try {
+      setDoc(doc(db, 'notes', newNote.id), newNote).catch(() => {});
+    } catch {}
+
+    return { success: true, note: newNote };
+  },
+
   async updateNote(
     noteId: string,
-    updates: { title?: string; content?: string; is_pinned?: boolean }
+    updates: {
+      title?: string;
+      content?: string;
+      is_pinned?: boolean;
+      owner_username?: string;
+      user_id?: string;
+      share_slug?: string;
+      share_active?: boolean;
+      share_password?: string;
+      remove_share_password?: boolean;
+      remove_share?: boolean;
+    }
   ): Promise<{ success: boolean; error?: string }> {
     const now = new Date().toISOString();
 
     // 1. Update local notes
     const localNotes = getLocalNotes();
     let updatedNoteObj: Note | null = null;
-    const updatedLocal = localNotes.map((n) => {
-      if (n.id === noteId || n.local_id === noteId) {
-        updatedNoteObj = {
-          ...n,
-          ...updates,
-          updated_at: now,
-        };
-        return updatedNoteObj;
-      }
-      return n;
-    });
+    const cleanUsername = updates.owner_username?.trim().toLowerCase().replace(/^@+/, '');
+
+    const updatedLocal = await Promise.all(
+      localNotes.map(async (n) => {
+        if (n.id === noteId || n.local_id === noteId) {
+          let updatedShare: NoteShare | null | undefined = n.share;
+
+          if (updates.remove_share) {
+            updatedShare = null;
+          } else if (
+            updates.share_slug !== undefined ||
+            typeof updates.share_active === 'boolean' ||
+            updates.share_password !== undefined ||
+            updates.remove_share_password
+          ) {
+            const currentShare = n.share;
+            const newSlug = updates.share_slug?.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || currentShare?.custom_slug || noteId;
+
+            let password_hash = currentShare?.password_hash;
+            let password_salt = currentShare?.password_salt;
+            let is_protected = currentShare?.is_password_protected || false;
+
+            if (updates.remove_share_password) {
+              password_hash = undefined;
+              password_salt = undefined;
+              is_protected = false;
+            } else if (updates.share_password && updates.share_password.trim()) {
+              password_salt = generateSalt();
+              password_hash = await hashPassword(updates.share_password.trim(), password_salt);
+              is_protected = true;
+            }
+
+            updatedShare = {
+              id: currentShare?.id || crypto.randomUUID(),
+              note_id: noteId,
+              custom_slug: newSlug,
+              is_active: typeof updates.share_active === 'boolean' ? updates.share_active : (currentShare?.is_active ?? true),
+              is_password_protected: is_protected,
+              password_hash,
+              password_salt,
+              created_at: currentShare?.created_at || now,
+              updated_at: now,
+              owner_token: n.owner_token,
+              owner_user_id: updates.user_id || n.user_id,
+              owner_username: cleanUsername || n.owner_username,
+              allowed_users: currentShare?.allowed_users || [],
+            };
+
+            const shares = getLocalShares();
+            shares[newSlug] = updatedShare;
+            shares[noteId] = updatedShare;
+            saveLocalShares(shares);
+          }
+
+          updatedNoteObj = {
+            ...n,
+            title: updates.title !== undefined ? updates.title : n.title,
+            content: updates.content !== undefined ? updates.content : n.content,
+            is_pinned: typeof updates.is_pinned === 'boolean' ? updates.is_pinned : n.is_pinned,
+            owner_username: cleanUsername || n.owner_username,
+            user_id: updates.user_id || n.user_id,
+            share: updatedShare,
+            updated_at: now,
+          };
+          return updatedNoteObj;
+        }
+        return n;
+      })
+    );
     saveLocalNotes(updatedLocal);
 
     // 2. Update in Global Cloud Catalog & push realtime event
     try {
       const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
       const target = cloudNotes.find((n) => n.id === noteId || n.local_id === noteId);
-      if (target) {
+      const noteToSync: Note | null = (updatedNoteObj || target) as Note | null;
+
+      if (noteToSync) {
         const merged: Note = {
-          ...target,
-          ...updates,
+          ...((target || noteToSync) as Note),
+          ...noteToSync,
           updated_at: now,
         };
         await CloudShareService.syncNoteToGlobalCatalog(merged);
         await CloudShareService.syncNoteToCloud(merged);
-      } else if (updatedNoteObj) {
-        await CloudShareService.syncNoteToGlobalCatalog(updatedNoteObj);
-        await CloudShareService.syncNoteToCloud(updatedNoteObj);
+        CloudShareService.publishGlobalRealtimeEvent({
+          type: 'note_updated',
+          noteId: merged.id,
+          title: merged.title,
+          owner_username: merged.owner_username,
+          user_id: merged.user_id,
+        });
+      }
+    } catch {}
+
+    // 3. Update Firestore non-blocking
+    try {
+      if (updatedNoteObj) {
+        const objToSave = updatedNoteObj as Note;
+        updateDoc(doc(db, 'notes', noteId), {
+          ...objToSave,
+          updated_at: now,
+        }).catch(() => {});
       }
     } catch {}
 
@@ -482,9 +665,31 @@ export const AdminService = {
     const filtered = localNotes.filter((n) => n.id !== noteId && n.local_id !== noteId);
     saveLocalNotes(filtered);
 
+    const shares = getLocalShares();
+    const updatedShares = { ...shares };
+    let shareRemoved = false;
+    for (const [slug, share] of Object.entries(updatedShares)) {
+      if (share.note_id === noteId || slug === noteId) {
+        delete updatedShares[slug];
+        shareRemoved = true;
+      }
+    }
+    if (shareRemoved) {
+      saveLocalShares(updatedShares);
+    }
+
     // 2. Delete from global cloud catalog & notify all screens
     try {
       await CloudShareService.deleteNoteFromGlobalCatalog(noteId);
+      CloudShareService.publishGlobalRealtimeEvent({
+        type: 'note_deleted',
+        noteId,
+      });
+    } catch {}
+
+    // 3. Delete from Firestore non-blocking
+    try {
+      deleteDoc(doc(db, 'notes', noteId)).catch(() => {});
     } catch {}
 
     return { success: true };

@@ -197,6 +197,7 @@ export function useNotes() {
       updated_at: now,
       owner_token: ownerToken,
       user_id: currentUser?.id,
+      owner_username: currentUser?.username,
       is_pinned: false,
       attachments: [],
       share: null,

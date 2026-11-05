@@ -522,6 +522,10 @@ export function MainLayout() {
         onClose={() => setIsAdminModalOpen(false)}
         currentUser={user}
         onNotesChanged={loadNotes}
+        onSelectNote={(noteId) => {
+          setActiveNoteId(noteId);
+          setIsAdminModalOpen(false);
+        }}
       />
 
       {/* Share Modal */}

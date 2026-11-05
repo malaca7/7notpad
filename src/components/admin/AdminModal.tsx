@@ -19,7 +19,8 @@ import {
   CheckCircle2, 
   Pin, 
   BarChart3,
-  Megaphone
+  Megaphone,
+  ExternalLink
 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -35,6 +36,7 @@ interface AdminModalProps {
   onClose: () => void;
   currentUser: UserProfile | null;
   onNotesChanged?: () => void;
+  onSelectNote?: (noteId: string) => void;
 }
 
 type AdminTab = 'overview' | 'users' | 'notes' | 'shares' | 'limits';
@@ -44,6 +46,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   onClose,
   currentUser,
   onNotesChanged,
+  onSelectNote,
 }) => {
   const { success, error } = useToast();
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
@@ -60,6 +63,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'user' | 'banned'>('all');
   const [noteSearch, setNoteSearch] = useState('');
+  const [noteStatusFilter, setNoteStatusFilter] = useState<'all' | 'pinned' | 'shared' | 'protected'>('all');
   const [shareSearch, setShareSearch] = useState('');
 
   // Sub-modal states
@@ -89,13 +93,30 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
   const [shareToDelete, setShareToDelete] = useState<string | null>(null);
 
-  // 5. Edit Note
+  // 5. Create Note
+  const [isCreateNoteOpen, setIsCreateNoteOpen] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [newNoteOwner, setNewNoteOwner] = useState('');
+  const [newNotePinned, setNewNotePinned] = useState(false);
+  const [newNoteEnableShare, setNewNoteEnableShare] = useState(false);
+  const [newNoteShareSlug, setNewNoteShareSlug] = useState('');
+  const [newNoteSharePassword, setNewNoteSharePassword] = useState('');
+  const [isSubmittingNote, setIsSubmittingNote] = useState(false);
+
+  // 6. Edit Note
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [editNoteTitle, setEditNoteTitle] = useState('');
   const [editNoteContent, setEditNoteContent] = useState('');
+  const [editNoteOwner, setEditNoteOwner] = useState('');
+  const [editNotePinned, setEditNotePinned] = useState(false);
+  const [editNoteEnableShare, setEditNoteEnableShare] = useState(false);
+  const [editNoteShareSlug, setEditNoteShareSlug] = useState('');
+  const [editNoteSharePassword, setEditNoteSharePassword] = useState('');
+  const [editNoteRemovePassword, setEditNoteRemovePassword] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
 
-  // 6. Share password edit
+  // 7. Share password edit
   const [shareForPassword, setShareForPassword] = useState<string | null>(null);
   const [newSharePassword, setNewSharePassword] = useState('');
   const [isSettingSharePassword, setIsSettingSharePassword] = useState(false);
@@ -168,14 +189,23 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   // Filtered Notes
   const filteredNotes = useMemo(() => {
     const q = noteSearch.toLowerCase().trim();
-    if (!q) return notes;
     return notes.filter((n) => {
-      const matchTitle = n.title.toLowerCase().includes(q);
-      const matchContent = n.content.toLowerCase().includes(q);
-      const matchAuthor = (n.owner_username || '').toLowerCase().includes(q);
-      return matchTitle || matchContent || matchAuthor;
+      const matchSearch =
+        !q ||
+        n.title.toLowerCase().includes(q) ||
+        n.content.toLowerCase().includes(q) ||
+        (n.owner_username || '').toLowerCase().includes(q) ||
+        (n.share?.custom_slug || '').toLowerCase().includes(q);
+
+      if (!matchSearch) return false;
+
+      if (noteStatusFilter === 'pinned' && !n.is_pinned) return false;
+      if (noteStatusFilter === 'shared' && (!n.share || !n.share.is_active)) return false;
+      if (noteStatusFilter === 'protected' && (!n.share || !n.share.is_password_protected)) return false;
+
+      return true;
     });
-  }, [notes, noteSearch]);
+  }, [notes, noteSearch, noteStatusFilter]);
 
   // Filtered Shares
   const filteredShares = useMemo(() => {
@@ -283,25 +313,96 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   // Handlers for Notes Management
+  const handleCreateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingNote(true);
+    try {
+      const cleanOwner = newNoteOwner.trim().toLowerCase().replace(/^@+/, '') || currentUser?.username || 'malaca';
+      const res = await AdminService.createNote({
+        title: newNoteTitle.trim() || 'Novo Bloco de Nota',
+        content: newNoteContent,
+        owner_username: cleanOwner,
+        is_pinned: newNotePinned,
+        share_slug: newNoteEnableShare && newNoteShareSlug.trim() ? newNoteShareSlug.trim() : undefined,
+        share_password: newNoteEnableShare && newNoteSharePassword.trim() ? newNoteSharePassword.trim() : undefined,
+      });
+
+      if (res.success && res.note) {
+        success('Bloco de nota criado!', `A nota "${res.note.title}" foi criada com sucesso.`);
+        setIsCreateNoteOpen(false);
+        setNewNoteTitle('');
+        setNewNoteContent('');
+        setNewNoteOwner(currentUser?.username || 'malaca');
+        setNewNotePinned(false);
+        setNewNoteEnableShare(false);
+        setNewNoteShareSlug('');
+        setNewNoteSharePassword('');
+        loadAdminData();
+        if (onNotesChanged) onNotesChanged();
+      } else {
+        error('Falha ao criar nota', res.error || 'Erro desconhecido.');
+      }
+    } catch {
+      error('Erro ao criar bloco de nota');
+    } finally {
+      setIsSubmittingNote(false);
+    }
+  };
+
   const handleSaveNoteEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingNote) return;
     setIsSavingNote(true);
     try {
+      const cleanOwner = editNoteOwner.trim().toLowerCase().replace(/^@+/, '') || editingNote.owner_username || 'malaca';
       const res = await AdminService.updateNote(editingNote.id, {
-        title: editNoteTitle,
+        title: editNoteTitle.trim() || 'Sem título',
         content: editNoteContent,
+        owner_username: cleanOwner,
+        is_pinned: editNotePinned,
+        remove_share: !editNoteEnableShare && Boolean(editingNote.share),
+        share_slug: editNoteEnableShare && editNoteShareSlug.trim() ? editNoteShareSlug.trim() : undefined,
+        share_active: editNoteEnableShare,
+        share_password: editNoteEnableShare && editNoteSharePassword.trim() ? editNoteSharePassword.trim() : undefined,
+        remove_share_password: editNoteRemovePassword,
       });
+
       if (res.success) {
-        success('Nota atualizada!', 'Título e conteúdo salvos com sucesso.');
+        success('Nota atualizada!', 'Alterações salvas e sincronizadas em toda a plataforma.');
         setEditingNote(null);
         loadAdminData();
         if (onNotesChanged) onNotesChanged();
       } else {
-        error('Erro ao atualizar nota');
+        error('Erro ao atualizar nota', res.error);
       }
+    } catch {
+      error('Erro ao salvar alterações da nota');
     } finally {
       setIsSavingNote(false);
+    }
+  };
+
+  const handleTogglePinNote = async (note: Note) => {
+    try {
+      const res = await AdminService.updateNote(note.id, { is_pinned: !note.is_pinned });
+      if (res.success) {
+        success(note.is_pinned ? 'Nota desafixada' : 'Nota fixada no topo!');
+        loadAdminData();
+        if (onNotesChanged) onNotesChanged();
+      }
+    } catch {
+      error('Erro ao alterar fixação');
+    }
+  };
+
+  const handleOpenNoteInEditor = (noteId: string) => {
+    if (onSelectNote) {
+      onSelectNote(noteId);
+      onClose();
+    } else {
+      const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+      const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+      window.location.href = `${window.location.origin}${cleanBase}/notpad/${noteId}`;
     }
   };
 
@@ -797,15 +898,83 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         {/* ==================================================== */}
         {activeTab === 'notes' && (
           <div className="space-y-4">
-            <div className="flex items-center px-3 py-2 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] focus-within:ring-2 focus-within:ring-brand-500/40">
-              <Search className="w-4 h-4 text-gray-400 mr-2 shrink-0" />
-              <input
-                type="text"
-                value={noteSearch}
-                onChange={(e) => setNoteSearch(e.target.value)}
-                placeholder="Pesquisar por título, texto ou autor..."
-                className="w-full bg-transparent text-xs text-gray-100 placeholder:text-gray-500 outline-none"
-              />
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+              <div className="flex-1 flex items-center px-3 py-2 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] focus-within:ring-2 focus-within:ring-brand-500/40">
+                <Search className="w-4 h-4 text-gray-400 mr-2 shrink-0" />
+                <input
+                  type="text"
+                  value={noteSearch}
+                  onChange={(e) => setNoteSearch(e.target.value)}
+                  placeholder="Pesquisar por título, texto, autor ou link /slug..."
+                  className="w-full bg-transparent text-xs text-gray-100 placeholder:text-gray-500 outline-none"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setNewNoteTitle('');
+                  setNewNoteContent('');
+                  setNewNoteOwner(currentUser?.username || 'malaca');
+                  setNewNotePinned(false);
+                  setNewNoteEnableShare(false);
+                  setNewNoteShareSlug('');
+                  setNewNoteSharePassword('');
+                  setIsCreateNoteOpen(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-lg shadow-brand-500/20 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Novo Bloco de Nota</span>
+              </button>
+            </div>
+
+            {/* Filter Pills */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setNoteStatusFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  noteStatusFilter === 'all'
+                    ? 'bg-brand-500/20 text-brand-300 border border-brand-500/30'
+                    : 'bg-[#0a0a0a] text-gray-400 border border-[#1c1c1c] hover:text-white'
+                }`}
+              >
+                Todas ({notes.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setNoteStatusFilter('pinned')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 ${
+                  noteStatusFilter === 'pinned'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : 'bg-[#0a0a0a] text-gray-400 border border-[#1c1c1c] hover:text-white'
+                }`}
+              >
+                <Pin className="w-3 h-3" /> Fixadas ({notes.filter((n) => n.is_pinned).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setNoteStatusFilter('shared')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 ${
+                  noteStatusFilter === 'shared'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                    : 'bg-[#0a0a0a] text-gray-400 border border-[#1c1c1c] hover:text-white'
+                }`}
+              >
+                <Share2 className="w-3 h-3" /> Compartilhadas ({notes.filter((n) => n.share && n.share.is_active).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setNoteStatusFilter('protected')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 ${
+                  noteStatusFilter === 'protected'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                    : 'bg-[#0a0a0a] text-gray-400 border border-[#1c1c1c] hover:text-white'
+                }`}
+              >
+                <Lock className="w-3 h-3" /> Com Senha ({notes.filter((n) => n.share && n.share.is_password_protected).length})
+              </button>
             </div>
 
             <div className="rounded-2xl border border-[#1c1c1c] bg-[#050505] overflow-hidden divide-y divide-[#141414]">
@@ -817,17 +986,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 filteredNotes.map((note) => {
                   const isShared = Boolean(note.share && note.share.is_active);
                   const isProtected = Boolean(note.share && note.share.is_password_protected);
+                  const author = note.owner_username 
+                    ? `@${note.owner_username}`
+                    : (note.user_id ? `@${users.find(u => u.id === note.user_id)?.username || 'usuario'}` : '@malaca');
 
                   return (
                     <div
                       key={note.id}
                       className="p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-[#080808] transition-colors"
                     >
-                      <div className="space-y-1 max-w-xl">
+                      <div className="space-y-1.5 max-w-xl">
                         <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="text-xs font-bold text-gray-100">
                             {note.title || 'Sem título'}
                           </h4>
+
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[#121212] text-gray-300 border border-[#222]">
+                            {author}
+                          </span>
+
                           {note.is_pinned && (
                             <span className="text-[10px] text-amber-400 flex items-center gap-1 font-mono">
                               <Pin className="w-3 h-3 fill-amber-400" /> Fixada
@@ -849,21 +1026,69 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                           {note.content.replace(/<[^>]*>/g, '').trim() || 'Nota vazia'}
                         </p>
 
-                        <div className="text-[10px] text-gray-500">
-                          ID: <span className="font-mono">{note.id.slice(0, 12)}...</span> • Atualizado em {new Date(note.updated_at).toLocaleString('pt-BR')}
+                        <div className="text-[10px] text-gray-500 flex items-center gap-2 flex-wrap">
+                          <span>ID: <span className="font-mono">{note.id.slice(0, 10)}...</span></span>
+                          <span>•</span>
+                          <span>Atualizado em {new Date(note.updated_at).toLocaleString('pt-BR')}</span>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 self-end sm:self-center">
                         <button
                           type="button"
+                          onClick={() => handleTogglePinNote(note)}
+                          className={`p-2 rounded-xl border border-[#1c1c1c] transition-colors ${
+                            note.is_pinned
+                              ? 'text-amber-400 bg-amber-500/10 hover:bg-amber-500/20'
+                              : 'text-gray-400 hover:text-amber-400 hover:bg-[#141414]'
+                          }`}
+                          title={note.is_pinned ? 'Desafixar nota' : 'Fixar nota no topo'}
+                        >
+                          <Pin className={`w-3.5 h-3.5 ${note.is_pinned ? 'fill-amber-400' : ''}`} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenNoteInEditor(note.id)}
+                          className="p-2 rounded-xl text-gray-400 hover:text-cyan-400 hover:bg-[#141414] border border-[#1c1c1c] transition-colors"
+                          title="Abrir no Editor 7NotPad"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+
+                        {isShared && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyLink(note.share!.custom_slug)}
+                            className="p-2 rounded-xl text-gray-400 hover:text-brand-400 hover:bg-[#141414] border border-[#1c1c1c] transition-colors"
+                            title="Copiar link compartilhado"
+                          >
+                            {copiedSlug === note.share!.custom_slug ? (
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
                           onClick={() => {
                             setEditingNote(note);
                             setEditNoteTitle(note.title);
                             setEditNoteContent(note.content);
+                            setEditNoteOwner(
+                              note.owner_username ||
+                              (note.user_id ? users.find((u) => u.id === note.user_id)?.username || '' : 'malaca')
+                            );
+                            setEditNotePinned(Boolean(note.is_pinned));
+                            setEditNoteEnableShare(Boolean(note.share && note.share.is_active));
+                            setEditNoteShareSlug(note.share?.custom_slug || '');
+                            setEditNoteSharePassword('');
+                            setEditNoteRemovePassword(false);
                           }}
                           className="p-2 rounded-xl text-gray-400 hover:text-brand-400 hover:bg-[#141414] border border-[#1c1c1c] transition-colors"
-                          title="Visualizar e Editar conteúdo"
+                          title="Visualizar e Editar configurações da nota"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
@@ -1340,13 +1565,157 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         </form>
       </Modal>
 
-      {/* 4. Modal Visualizar/Editar Nota */}
-      <Modal isOpen={Boolean(editingNote)} onClose={() => setEditingNote(null)} maxWidth="2xl" title="Editar Bloco de Notas">
+      {/* 4. Modal Criar Novo Bloco de Nota */}
+      <Modal
+        isOpen={isCreateNoteOpen}
+        onClose={() => setIsCreateNoteOpen(false)}
+        maxWidth="2xl"
+        title="Criar Novo Bloco de Nota"
+      >
+        <form onSubmit={handleCreateNote} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-gray-300">Título da Nota</label>
+            <input
+              type="text"
+              required
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+              placeholder="Ex: Tarefas Semanais, Brainstorm, Ideias..."
+              className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-bold text-gray-100 outline-none focus:border-brand-500"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-300">Proprietário / Autor</label>
+              <select
+                value={newNoteOwner}
+                onChange={(e) => setNewNoteOwner(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.username}>
+                    @{u.username} ({u.full_name}) {u.username.toLowerCase() === 'malaca' ? '⭐ Admin' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center pt-5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={newNotePinned}
+                  onChange={(e) => setNewNotePinned(e.target.checked)}
+                  className="w-4 h-4 rounded text-brand-600 focus:ring-0 bg-[#0d0d0d] border-[#1c1c1c]"
+                />
+                <span className="text-xs text-gray-300 font-medium flex items-center gap-1.5">
+                  <Pin className="w-3.5 h-3.5 text-amber-400" /> Fixar esta nota no topo
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-gray-300">Conteúdo Inicial</label>
+            <textarea
+              rows={6}
+              value={newNoteContent}
+              onChange={(e) => setNewNoteContent(e.target.value)}
+              placeholder="Digite o texto inicial da nota..."
+              className="w-full px-3 py-2.5 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-mono text-gray-100 outline-none focus:border-brand-500 leading-relaxed"
+            />
+          </div>
+
+          {/* Compartilhamento Opcional */}
+          <div className="p-3.5 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={newNoteEnableShare}
+                onChange={(e) => setNewNoteEnableShare(e.target.checked)}
+                className="w-4 h-4 rounded text-brand-600 focus:ring-0 bg-[#0d0d0d] border-[#1c1c1c]"
+              />
+              <span className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                <Share2 className="w-3.5 h-3.5 text-cyan-400" /> Ativar Link de Compartilhamento Público
+              </span>
+            </label>
+
+            {newNoteEnableShare && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-400">Link Personalizado (/slug)</label>
+                  <div className="flex items-center px-2.5 py-1.5 rounded-lg bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-mono text-gray-300">
+                    <span className="text-gray-500 text-[11px]">/notpad/</span>
+                    <input
+                      type="text"
+                      value={newNoteShareSlug}
+                      onChange={(e) => setNewNoteShareSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
+                      placeholder="meu-link"
+                      className="w-full bg-transparent outline-none text-cyan-300"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-400">Senha de Proteção (Opcional)</label>
+                  <input
+                    type="text"
+                    value={newNoteSharePassword}
+                    onChange={(e) => setNewNoteSharePassword(e.target.value)}
+                    placeholder="Deixe em branco para público"
+                    className="w-full px-3 py-1.5 rounded-lg bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-mono text-gray-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setIsCreateNoteOpen(false)}
+              className="flex-1 py-2.5 rounded-xl border border-[#1c1c1c] text-xs text-gray-400 hover:text-white transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmittingNote}
+              className="flex-1 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-colors shadow-lg shadow-brand-500/20"
+            >
+              {isSubmittingNote ? 'Criando Bloco...' : 'Criar Bloco de Nota'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* 5. Modal Visualizar/Editar Nota */}
+      <Modal
+        isOpen={Boolean(editingNote)}
+        onClose={() => setEditingNote(null)}
+        maxWidth="2xl"
+        title={
+          <div className="flex items-center justify-between w-full pr-6">
+            <span>Editar Bloco de Notas</span>
+            {editingNote && (
+              <button
+                type="button"
+                onClick={() => handleOpenNoteInEditor(editingNote.id)}
+                className="text-[11px] font-medium text-cyan-400 hover:text-cyan-300 flex items-center gap-1 bg-cyan-500/10 px-2 py-1 rounded-lg border border-cyan-500/20 transition-colors"
+              >
+                <ExternalLink className="w-3 h-3" /> Abrir no Editor NotPad
+              </button>
+            )}
+          </div>
+        }
+      >
         <form onSubmit={handleSaveNoteEdit} className="space-y-4">
           <div className="space-y-1">
             <label className="text-xs font-medium text-gray-300">Título da Nota</label>
             <input
               type="text"
+              required
               value={editNoteTitle}
               onChange={(e) => setEditNoteTitle(e.target.value)}
               placeholder="Título"
@@ -1354,30 +1723,126 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             />
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-300">Proprietário / Autor</label>
+              <select
+                value={editNoteOwner}
+                onChange={(e) => setEditNoteOwner(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
+              >
+                {users.map((u) => (
+                  <option key={u.id} value={u.username}>
+                    @{u.username} ({u.full_name})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center pt-5">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={editNotePinned}
+                  onChange={(e) => setEditNotePinned(e.target.checked)}
+                  className="w-4 h-4 rounded text-brand-600 focus:ring-0 bg-[#0d0d0d] border-[#1c1c1c]"
+                />
+                <span className="text-xs text-gray-300 font-medium flex items-center gap-1.5">
+                  <Pin className="w-3.5 h-3.5 text-amber-400" /> Fixada no topo
+                </span>
+              </label>
+            </div>
+          </div>
+
           <div className="space-y-1">
-            <label className="text-xs font-medium text-gray-300">Conteúdo (HTML / Texto)</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-gray-300">Conteúdo (HTML / Texto)</label>
+              <span className="text-[10px] text-gray-500 font-mono">
+                {editNoteContent.length} caracteres
+              </span>
+            </div>
             <textarea
-              rows={10}
+              rows={8}
               value={editNoteContent}
               onChange={(e) => setEditNoteContent(e.target.value)}
               className="w-full px-3 py-2.5 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-mono text-gray-100 outline-none focus:border-brand-500 leading-relaxed"
             />
           </div>
 
+          {/* Configurações de Compartilhamento */}
+          <div className="p-3.5 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] space-y-3">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={editNoteEnableShare}
+                onChange={(e) => setEditNoteEnableShare(e.target.checked)}
+                className="w-4 h-4 rounded text-brand-600 focus:ring-0 bg-[#0d0d0d] border-[#1c1c1c]"
+              />
+              <span className="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                <Share2 className="w-3.5 h-3.5 text-cyan-400" /> Link de Compartilhamento Ativo
+              </span>
+            </label>
+
+            {editNoteEnableShare && (
+              <div className="space-y-3 pt-1">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-400">Link Personalizado (/slug)</label>
+                  <div className="flex items-center px-2.5 py-1.5 rounded-lg bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-mono text-gray-300">
+                    <span className="text-gray-500 text-[11px]">/notpad/</span>
+                    <input
+                      type="text"
+                      value={editNoteShareSlug}
+                      onChange={(e) => setEditNoteShareSlug(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'))}
+                      placeholder="slug-do-link"
+                      className="w-full bg-transparent outline-none text-cyan-300"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-400">
+                    {editingNote?.share?.is_password_protected ? 'Alterar Senha de Acesso' : 'Definir Senha de Acesso (Opcional)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editNoteSharePassword}
+                    onChange={(e) => setEditNoteSharePassword(e.target.value)}
+                    placeholder={editingNote?.share?.is_password_protected ? 'Deixe em branco para manter a senha atual' : 'Sem senha (público)'}
+                    className="w-full px-3 py-1.5 rounded-lg bg-[#0d0d0d] border border-[#1c1c1c] text-xs font-mono text-gray-100 outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                {editingNote?.share?.is_password_protected && (
+                  <label className="flex items-center gap-2 cursor-pointer select-none pt-1">
+                    <input
+                      type="checkbox"
+                      checked={editNoteRemovePassword}
+                      onChange={(e) => setEditNoteRemovePassword(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-rose-600 focus:ring-0 bg-[#0d0d0d] border-[#1c1c1c]"
+                    />
+                    <span className="text-[11px] text-rose-300 font-medium">
+                      Remover proteção de senha (tornar totalmente público)
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-2 pt-2">
             <button
               type="button"
               onClick={() => setEditingNote(null)}
-              className="flex-1 py-2 rounded-xl border border-[#1c1c1c] text-xs text-gray-400 hover:text-white"
+              className="flex-1 py-2.5 rounded-xl border border-[#1c1c1c] text-xs text-gray-400 hover:text-white transition-colors"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={isSavingNote}
-              className="flex-1 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold"
+              className="flex-1 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold transition-colors shadow-lg shadow-brand-500/20"
             >
-              {isSavingNote ? 'Salvando...' : 'Salvar Nota'}
+              {isSavingNote ? 'Salvando...' : 'Salvar Alterações'}
             </button>
           </div>
         </form>

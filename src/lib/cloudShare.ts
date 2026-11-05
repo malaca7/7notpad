@@ -140,8 +140,15 @@ export function subscribeToGlobalRealtimeEvents(listener: (event: any) => void):
   };
 }
 
+// Known stable cloud paths for immediate fast bootstrap across all devices
+const DEFAULT_KNOWN_PATHS: Record<string, string> = {
+  '7notpad_global_notes_catalog_v2': '7np-11-05-37',
+  '7notpad_global_users_store_v2': '7np-11-05-5',
+  '7notpad_users_directory_v2': '7np-11-05-32',
+};
+
 // In-memory cache & serialization queues to prevent concurrent race conditions
-const memoryCloudPaths: Record<string, string> = {};
+const memoryCloudPaths: Record<string, string> = { ...DEFAULT_KNOWN_PATHS };
 const inFlightSyncs = new Map<string, Promise<boolean>>();
 const pendingSyncPayloads = new Map<string, { note: Note; explicitShare?: NoteShare | null }>();
 
