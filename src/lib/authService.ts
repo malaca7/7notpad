@@ -150,7 +150,7 @@ export function subscribeToAuth(listener: AuthListener): () => void {
   };
 }
 
-function notifyAuthChange(session: AuthSession | null) {
+export function notifyAuthChange(session: AuthSession | null) {
   authListeners.forEach(fn => {
     try {
       fn(session);
@@ -160,7 +160,7 @@ function notifyAuthChange(session: AuthSession | null) {
   });
 }
 
-function saveLocalSession(session: AuthSession) {
+export function saveLocalSession(session: AuthSession) {
   try {
     localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(session));
   } catch (err) {
@@ -221,6 +221,36 @@ export const AuthService = {
     if (session.user.username?.toLowerCase() === 'malaca') {
       session.user.role = 'admin';
     }
+    return session.user;
+  },
+
+  async syncCurrentUserRole(): Promise<UserProfile | null> {
+    const session = this.getCurrentSession();
+    if (!session || !session.user) return null;
+
+    const cleanUsername = session.user.username?.toLowerCase().replace(/^@+/, '');
+    if (cleanUsername === 'malaca') {
+      if (session.user.role !== 'admin') {
+        session.user.role = 'admin';
+        saveLocalSession(session);
+      }
+      return session.user;
+    }
+
+    try {
+      const cloudUsers = await CloudShareService.fetchGlobalUsers();
+      const match = cloudUsers.find(
+        (u: any) =>
+          u.id === session.user.id ||
+          (u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanUsername)
+      );
+
+      if (match && match.role && match.role !== session.user.role) {
+        session.user.role = match.role;
+        saveLocalSession(session);
+      }
+    } catch {}
+
     return session.user;
   },
 

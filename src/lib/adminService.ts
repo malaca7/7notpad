@@ -7,7 +7,7 @@ import {
   updateDoc 
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { type StoredUser } from './authService';
+import { type StoredUser, saveLocalSession } from './authService';
 import { CloudShareService } from './cloudShare';
 import { generateSalt, hashPassword, getOrCreateOwnerToken } from './crypto';
 import { getLocalNotes, saveLocalNotes, getLocalShares, saveLocalShares } from './storage';
@@ -302,7 +302,50 @@ export const AdminService = {
     }
   ): Promise<{ success: boolean; error?: string }> {
     const localUsers = getLocalUsersList();
-    const user = localUsers.find((u) => u.id === userId);
+    let user = localUsers.find((u) => u.id === userId);
+
+    // If user is not present in local users, fetch from cloud global users
+    if (!user) {
+      try {
+        const cloudUsers = await CloudShareService.fetchGlobalUsers();
+        const found = cloudUsers.find(
+          (u: any) =>
+            u.id === userId ||
+            (u.username && updates.username && u.username.toLowerCase() === updates.username.toLowerCase())
+        );
+        if (found) {
+          user = { ...(found as StoredUser) };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
+
+    // If still not found, check public platform users directory
+    if (!user) {
+      try {
+        const platformUsers = await CloudShareService.fetchPlatformUsers();
+        const found = platformUsers.find((u: any) => u.id === userId);
+        if (found) {
+          user = {
+            id: found.id,
+            full_name: found.full_name || found.username,
+            username: found.username,
+            email: `${found.username}@7notpad.local`,
+            role: updates.role || 'user',
+            password_salt: '',
+            password_hash: '',
+            birth_date: '2000-01-01',
+            security_question: 'Qual a sua comida ou prato favorito?',
+            security_answer: 'padrao',
+            email_verified: true,
+            is_banned: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
 
     const isMalaca = (user?.username?.toLowerCase() === 'malaca') || (updates.username?.toLowerCase() === 'malaca');
 
@@ -330,6 +373,19 @@ export const AdminService = {
       await CloudShareService.syncGlobalUser(user).catch(() => {});
     }
 
+    // If current session user was modified, update local session and notify
+    try {
+      const sessionRaw = localStorage.getItem('7notpad_session');
+      if (sessionRaw) {
+        const session = JSON.parse(sessionRaw);
+        if (session && session.user && user && (session.user.id === user.id || session.user.username?.toLowerCase() === user.username?.toLowerCase())) {
+          session.user.role = user.role;
+          if (updates.full_name) session.user.full_name = user.full_name;
+          saveLocalSession(session);
+        }
+      }
+    } catch {}
+
     // Update in Firestore non-blocking
     try {
       const cleanUpdates: any = { updated_at: now };
@@ -355,7 +411,18 @@ export const AdminService = {
     const now = new Date().toISOString();
 
     const localUsers = getLocalUsersList();
-    const user = localUsers.find((u) => u.id === userId);
+    let user = localUsers.find((u) => u.id === userId);
+    if (!user) {
+      try {
+        const cloudUsers = await CloudShareService.fetchGlobalUsers();
+        const found = cloudUsers.find((u: any) => u.id === userId);
+        if (found) {
+          user = { ...(found as StoredUser) };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
+
     if (user) {
       user.password_salt = salt;
       user.password_hash = hash;

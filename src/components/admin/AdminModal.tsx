@@ -14,7 +14,6 @@ import {
   Unlock, 
   Check, 
   Copy, 
-  RefreshCw, 
   X, 
   CheckCircle2, 
   Pin, 
@@ -50,7 +49,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 }) => {
   const { success, error } = useToast();
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
-  const [isLoading, setIsLoading] = useState(false);
 
   // Data states
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -126,7 +124,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   // Fetch all admin data
   const loadAdminData = async () => {
-    setIsLoading(true);
     try {
       const [freshStats, freshUsers, freshNotes, freshShares, freshLimits] = await Promise.all([
         AdminService.getStats(),
@@ -142,8 +139,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setLimits(freshLimits);
     } catch (err: any) {
       error('Erro ao carregar dados', err?.message || 'Falha ao sincronizar painel.');
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -156,14 +151,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       loadAdminData();
     });
 
+    // Auto-refresh automatically every 3.5s while admin modal is open
+    const pollInterval = setInterval(() => {
+      loadAdminData();
+    }, 3500);
+
     const handleFocus = () => {
       loadAdminData();
     };
     window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
 
     return () => {
       unsub();
+      clearInterval(pollInterval);
       window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
     };
   }, [isOpen]);
 
@@ -536,18 +539,6 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 Gestão central de usuários, blocos de notas, links e regras da plataforma
               </p>
             </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={loadAdminData}
-              disabled={isLoading}
-              className="p-2 rounded-xl border border-[#1c1c1c] bg-[#0a0a0a] text-gray-300 hover:text-white hover:bg-[#141414] transition-colors"
-              title="Recarregar dados"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </button>
           </div>
         </div>
       }

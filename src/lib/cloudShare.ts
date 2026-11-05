@@ -611,6 +611,7 @@ export const CloudShareService = {
         type: 'user_updated',
         userId: mergedUser.id,
         username: cleanUsername,
+        role: mergedUser.role,
       });
     } catch (err) {
       console.warn('CloudShareService.syncGlobalUser warning:', err);

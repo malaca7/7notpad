@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AuthService, subscribeToAuth } from '../lib/authService';
+import { CloudShareService } from '../lib/cloudShare';
 import type { AuthSession, UserProfile } from '../types/auth';
 
 export function useAuth() {
@@ -10,12 +11,33 @@ export function useAuth() {
     // Initial sync
     setSession(AuthService.getCurrentSession());
 
-    // Listen to changes
+    // Sync user role from cloud in background
+    AuthService.syncCurrentUserRole();
+
+    // Listen to local auth session changes
     const unsubscribe = subscribeToAuth(updatedSession => {
       setSession(updatedSession);
     });
 
-    return unsubscribe;
+    // Real-time update when an admin changes user role/profile from another screen
+    const unsubGlobal = CloudShareService.subscribeToGlobalRealtimeEvents(evt => {
+      if (evt.type === 'user_updated') {
+        AuthService.syncCurrentUserRole();
+      }
+    });
+
+    const handleFocus = () => {
+      AuthService.syncCurrentUserRole();
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      unsubscribe();
+      unsubGlobal();
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
   }, []);
 
   const user: UserProfile | null = session ? session.user : null;

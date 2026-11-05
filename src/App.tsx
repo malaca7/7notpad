@@ -544,6 +544,11 @@ export function MainLayout() {
         onClose={() => setIsSettingsModalOpen(false)}
         onNotesImported={loadNotes}
         initialTab={settingsInitialTab}
+        isAdmin={isAdmin}
+        onOpenAdmin={() => {
+          setIsSettingsModalOpen(false);
+          setIsAdminModalOpen(true);
+        }}
         onOpenAuthModal={() => {
           setIsSettingsModalOpen(false);
           setAuthModalView('signup');

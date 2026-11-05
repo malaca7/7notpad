@@ -5,7 +5,7 @@ import { getOrCreateOwnerToken } from '../../lib/crypto';
 import { exportNotesToJson, importNotesFromJson } from '../../lib/exportImport';
 import { StorageService } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
-import { SECURITY_QUESTIONS } from '../../types/auth';
+import { SECURITY_QUESTIONS, isUserAdmin } from '../../types/auth';
 import { useAuth } from '../../hooks/useAuth';
 import { useToast } from '../common/Toast';
 import { 
@@ -41,6 +41,8 @@ interface SettingsModalProps {
   onNotesImported?: () => void;
   initialTab?: 'account' | 'editor' | 'cloud' | 'security' | 'backup';
   onOpenAuthModal?: () => void;
+  onOpenAdmin?: () => void;
+  isAdmin?: boolean;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -49,6 +51,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onNotesImported,
   initialTab = 'account',
   onOpenAuthModal,
+  onOpenAdmin,
+  isAdmin = false,
 }) => {
   const { settings, updateSettings, defaultSettings } = useEditorSettings();
   const { success, error } = useToast();
@@ -469,7 +473,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       )}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-sm text-gray-900 dark:text-gray-100">
                           {user.full_name}
                         </span>
@@ -477,6 +481,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <ShieldCheck className="w-3 h-3" />
                           Confirmado
                         </span>
+                        {(isAdmin || isUserAdmin(user)) && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 uppercase">
+                            Admin
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">
                         @{user.username}
@@ -484,7 +493,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                    {(isAdmin || isUserAdmin(user)) && onOpenAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenAdmin();
+                        }}
+                        className="flex-1 sm:flex-none px-3 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-amber-500/10"
+                        title="Abrir Painel de Administração"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Painel Admin</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={handleMigrateNotesToUser}
