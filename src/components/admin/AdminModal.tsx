@@ -44,7 +44,7 @@ interface AdminModalProps {
   onSelectNote?: (noteId: string) => void;
 }
 
-type AdminTab = 'overview' | 'users' | 'notes' | 'shares' | 'limits';
+type AdminTab = 'overview' | 'users' | 'notes' | 'shares' | 'broadcast' | 'limits';
 
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
@@ -621,6 +621,25 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           >
             <Share2 className="w-3.5 h-3.5" />
             <span>Links de Acesso ({shares.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('broadcast')}
+            className={`flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === 'broadcast'
+                ? 'border-cyan-500 text-cyan-400 bg-cyan-500/5 rounded-t-xl'
+                : 'border-transparent text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Megaphone className="w-3.5 h-3.5" />
+            <span>Aviso Global (Banner)</span>
+            {limits.announcementActive && limits.announcementBanner && (
+              <span className="relative flex h-2 w-2 ml-0.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
+              </span>
+            )}
           </button>
 
           <button
@@ -1355,6 +1374,24 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </label>
             </div>
 
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-lg shadow-brand-600/30 transition-all"
+              >
+                Salvar Regras da Plataforma
+              </button>
+            </div>
+          </form>
+        )}
+
+
+
+        {/* ==================================================== */}
+        {/* TAB 5: TRANSMISSÃO DE AVISO GLOBAL (BANNER) */}
+        {/* ==================================================== */}
+        {activeTab === 'broadcast' && (
+          <form onSubmit={handleSaveLimits} className="space-y-4">
             {/* Broadcast Banner Control Center */}
             <div className="p-5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-4">
               {/* Header with Switch */}
@@ -1402,7 +1439,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               {/* 1. Tipo / Severidade do Aviso */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-gray-300 flex items-center justify-between">
-                  <span>Estilo & Severidade do Aviso</span>
+                  <span>Estilo &amp; Severidade do Aviso</span>
                   <span className="text-[11px] text-gray-400 font-normal">Define cores, ícone e destaque visual</span>
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -1608,16 +1645,45 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                type="submit"
-                className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-lg shadow-brand-600/30 transition-all"
-              >
-                Salvar Regras da Plataforma
-              </button>
+            <div className="flex items-center justify-between pt-2">
+              <div className="text-xs text-gray-400">
+                {limits.announcementActive ? (
+                  <span className="text-cyan-400 flex items-center gap-1.5 font-medium">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
+                    </span>
+                    Transmissão ativa e visível no topo da plataforma
+                  </span>
+                ) : (
+                  <span className="text-gray-500">Transmissão desligada no momento</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                {limits.announcementActive && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleBroadcast(false)}
+                    className="px-4 py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-xs font-semibold transition-all"
+                  >
+                    Desativar Transmissão
+                  </button>
+                )}
+
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all flex items-center gap-2"
+                >
+                  <Megaphone className="w-4 h-4" />
+                  <span>Salvar &amp; Transmitir no Site</span>
+                </button>
+              </div>
             </div>
           </form>
         )}
+
+
       </div>
 
       {/* ==================================================== */}
