@@ -408,7 +408,7 @@ export const AdminService = {
     try {
       const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
       for (const n of cloudNotes) {
-        if (n && n.id) {
+        if (n && n.id && n.local_id !== 'default_welcome_note' && !n.title?.includes('Bem-vindo')) {
           notesMap.set(n.id, n);
         }
       }
@@ -417,6 +417,7 @@ export const AdminService = {
     // 2. Merge local notes (if newer or not in cloud yet)
     const local = getLocalNotes();
     for (const n of local) {
+      if (n.local_id === 'default_welcome_note' || n.title?.includes('Bem-vindo')) continue;
       if (!notesMap.has(n.id)) {
         notesMap.set(n.id, n);
       } else {

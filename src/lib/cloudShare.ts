@@ -680,6 +680,11 @@ export const CloudShareService = {
    */
   async syncNoteToGlobalCatalog(note: Note, explicitShare?: NoteShare | null): Promise<void> {
     try {
+      // Do not store welcome notes in global cloud catalog
+      if (note.local_id === 'default_welcome_note' || note.title?.includes('Bem-vindo')) {
+        return;
+      }
+
       const existing = await this.fetchAllNotesFromGlobalCatalog();
       const now = new Date().toISOString();
       const effectiveShare: NoteShare | undefined = explicitShare ?? note.share ?? undefined;
@@ -691,7 +696,11 @@ export const CloudShareService = {
       };
 
       const filtered = existing.filter(
-        (n) => n.id !== note.id && (note.local_id ? n.local_id !== note.local_id : true)
+        (n) =>
+          n.id !== note.id &&
+          (note.local_id ? n.local_id !== note.local_id : true) &&
+          n.local_id !== 'default_welcome_note' &&
+          !n.title?.includes('Bem-vindo')
       );
       filtered.unshift(cleanNote);
 

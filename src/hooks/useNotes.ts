@@ -17,16 +17,16 @@ function getInitialActiveNoteId(initialNotes: Note[]): string | null {
     if (path.includes('/notpad/')) {
       const parts = path.split('/notpad/');
       const slug = parts[parts.length - 1]?.replace(/\/+$/, '').trim();
-      if (slug && slug !== 'notpad') {
-        const found = initialNotes.find((n) => n.id === slug);
+      if (slug && slug !== 'notpad' && slug !== '2de4bdef-8afd-4ee7-a238-74193628bf4f') {
+        const found = initialNotes.find((n) => n.id === slug && n.local_id !== 'default_welcome_note');
         if (found) return found.id;
       }
     }
     if (hash.includes('#/notpad/')) {
       const parts = hash.split('#/notpad/');
       const slug = parts[parts.length - 1]?.split('#')[0]?.replace(/\/+$/, '').trim();
-      if (slug && slug !== 'notpad') {
-        const found = initialNotes.find((n) => n.id === slug);
+      if (slug && slug !== 'notpad' && slug !== '2de4bdef-8afd-4ee7-a238-74193628bf4f') {
+        const found = initialNotes.find((n) => n.id === slug && n.local_id !== 'default_welcome_note');
         if (found) return found.id;
       }
     }

@@ -159,44 +159,20 @@ export function subscribeToRealtimeSync(callback: () => void): () => void {
   };
 }
 
-// Initial starter note with helpful tips
-const WELCOME_NOTE_HTML = `
-<h2>✨ Bem-vindo ao <strong>7NotPad</strong>!</h2>
-<p>Seu bloco de notas online rápido, moderno e <strong>sem necessidade de cadastro ou login</strong>.</p>
-<hr/>
-<h3>⚡ O que você pode fazer aqui:</h3>
-<ul>
-  <li><strong>Formatação Avançada:</strong> Digite em negrito, itálico, sublinhado, tachado, crie listas ordenadas, listas com marcadores e listas de tarefas.</li>
-  <li><strong>Inserir Imagens &amp; Anexos:</strong> Adicione imagens diretamente pelo botão da barra de ferramentas ou anexe arquivos importantes (PDFs, documentos, etc).</li>
-  <li><strong>Compartilhamento com Link Personalizado:</strong> Gere links no formato <code>7notpad.com/n/seu-link</code> e acesse de qualquer outro navegador ou celular!</li>
-  <li><strong>Totalmente Privado &amp; Automático:</strong> Suas alterações são salvas automaticamente com sincronização em nuvem em tempo real.</li>
-</ul>
-<blockquote>
-  <p><strong>Nuvem Ativa:</strong> Suas notas agora contam com sincronização global em tempo real para links compartilhados funcionarem perfeitamente em qualquer dispositivo.</p>
-</blockquote>
-`;
-
 export function getLocalNotes(): Note[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_NOTES_KEY);
     if (!raw) {
-      const token = getOrCreateOwnerToken();
-      const defaultNote: Note = {
-        id: crypto.randomUUID(),
-        local_id: 'default_welcome_note',
-        title: 'Bem-vindo ao 7NotPad ✨',
-        content: WELCOME_NOTE_HTML,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        owner_token: token,
-        is_pinned: true,
-        attachments: [],
-        share: null
-      };
-      saveLocalNotes([defaultNote]);
-      return [defaultNote];
+      return [];
     }
-    return JSON.parse(raw);
+    const parsed: Note[] = JSON.parse(raw);
+    const cleanNotes = parsed.filter(
+      (n) => n.local_id !== 'default_welcome_note' && !n.title?.includes('Bem-vindo ao 7NotPad')
+    );
+    if (cleanNotes.length !== parsed.length) {
+      saveLocalNotes(cleanNotes);
+    }
+    return cleanNotes;
   } catch (err) {
     console.error('Error reading local notes:', err);
     return [];
@@ -255,6 +231,7 @@ export const StorageService = {
       if (Array.isArray(cloudNotes) && cloudNotes.length > 0) {
         relevantRemoteNotes = cloudNotes.filter((n) => {
           if (!n) return false;
+          if (n.local_id === 'default_welcome_note' || n.title?.includes('Bem-vindo ao 7NotPad')) return false;
           // Anonymous visitor
           if (!currentUserId && !currentUsername) {
             return n.owner_token === ownerToken;
