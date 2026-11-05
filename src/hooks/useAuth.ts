@@ -22,9 +22,31 @@ export function useAuth() {
     // Real-time update when an admin changes user role/profile from another screen
     const unsubGlobal = CloudShareService.subscribeToGlobalRealtimeEvents(evt => {
       if (evt.type === 'user_updated') {
+        const currentSession = AuthService.getCurrentSession();
+        if (currentSession && currentSession.user) {
+          const matchUser =
+            (evt.userId && evt.userId === currentSession.user.id) ||
+            (evt.username &&
+              evt.username.toLowerCase() === currentSession.user.username?.toLowerCase().replace(/^@+/, ''));
+          if (matchUser && evt.is_banned && currentSession.user.username?.toLowerCase() !== 'malaca') {
+            AuthService.logout();
+            setSession(null);
+            window.dispatchEvent(
+              new CustomEvent('7notpad_user_banned', {
+                detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+              })
+            );
+            return;
+          }
+        }
         AuthService.syncCurrentUserRole();
       }
     });
+
+    const handleBannedEvent = () => {
+      setSession(null);
+    };
+    window.addEventListener('7notpad_user_banned', handleBannedEvent);
 
     const handleFocus = () => {
       AuthService.syncCurrentUserRole();
@@ -35,6 +57,7 @@ export function useAuth() {
     return () => {
       unsubscribe();
       unsubGlobal();
+      window.removeEventListener('7notpad_user_banned', handleBannedEvent);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);
     };

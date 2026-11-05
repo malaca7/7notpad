@@ -304,6 +304,54 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
+  // Quick 1-click role toggle handler
+  const handleQuickSetRole = async (user: UserProfile, targetRole: UserRole) => {
+    if (user.username.toLowerCase() === 'malaca') return;
+    if (user.role === targetRole) return;
+
+    // Optimistic UI update
+    setUsers((prev) =>
+      prev.map((u) => (u.id === user.id ? { ...u, role: targetRole } : u))
+    );
+
+    const res = await AdminService.changeUserRole(user.id, targetRole);
+    if (res.success) {
+      success(
+        'Cargo alterado!',
+        `@${user.username} agora é ${targetRole === 'admin' ? 'Administrador' : 'Usuário Padrão'}.`
+      );
+    } else {
+      error('Erro ao alterar cargo', res.error || 'Não foi possível alterar o cargo.');
+      loadAdminData();
+    }
+  };
+
+  // Quick 1-click suspend / block toggle handler
+  const handleQuickToggleBan = async (user: UserProfile) => {
+    if (user.username.toLowerCase() === 'malaca') {
+      error('Ação não permitida', 'O usuário principal @malaca não pode ser suspenso.');
+      return;
+    }
+    const willBan = !user.is_banned;
+
+    // Optimistic UI update
+    setUsers((prev) =>
+      prev.map((u) => (u.id === user.id ? { ...u, is_banned: willBan } : u))
+    );
+
+    const res = await AdminService.toggleUserBan(user.id, willBan);
+    if (res.success) {
+      if (willBan) {
+        success('Usuário suspenso!', `@${user.username} foi bloqueado com sucesso.`);
+      } else {
+        success('Usuário reativado!', `@${user.username} foi desbloqueado com sucesso.`);
+      }
+    } else {
+      error('Erro ao alterar status', res.error || 'Não foi possível alterar status de acesso.');
+      loadAdminData();
+    }
+  };
+
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passwordResetUser) return;
@@ -885,17 +933,19 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                     return (
                       <div
                         key={u.id}
-                        className="p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-[#080808] transition-colors"
+                        className={`p-3.5 sm:p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 hover:bg-[#080808] transition-colors border-b border-[#141414] last:border-b-0 ${
+                          u.is_banned ? 'bg-rose-950/10' : ''
+                        }`}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
                           {u.avatar_url ? (
                             <img
                               src={u.avatar_url}
                               alt={u.full_name}
-                              className="w-9 h-9 rounded-xl object-cover border border-[#1c1c1c] shrink-0"
+                              className="w-10 h-10 rounded-xl object-cover border border-[#1c1c1c] shrink-0"
                             />
                           ) : (
-                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
                               isAdmin 
                                 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' 
                                 : 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
@@ -904,9 +954,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             </div>
                           )}
 
-                          <div>
+                          <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-gray-100">
+                              <span className="text-xs font-bold text-gray-100 truncate">
                                 {u.full_name}
                               </span>
                               <span className="text-xs font-mono text-gray-400">
@@ -918,19 +968,81 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                                 </span>
                               )}
                               {u.is_banned && (
-                                <span className="text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded-md bg-rose-500/15 text-rose-300 border border-rose-500/30">
-                                  Suspenso
+                                <span className="text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                                  Suspenso / Bloqueado
                                 </span>
                               )}
                             </div>
-                            <div className="text-[11px] text-gray-500 mt-0.5">
+                            <div className="text-[11px] text-gray-500 mt-0.5 font-mono truncate">
                               ID: {u.id} • Cadastro em {new Date(u.created_at).toLocaleDateString('pt-BR')}
                             </div>
                           </div>
                         </div>
 
-                        {/* Actions */}
-                        <div className="flex items-center gap-1.5 self-end sm:self-center">
+                        {/* Quick Controls & Actions */}
+                        <div className="flex items-center gap-2 self-end md:self-center flex-wrap shrink-0">
+                          {/* Quick Role Segmented Pill */}
+                          {isMalaca ? (
+                            <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-mono font-bold flex items-center gap-1">
+                              <ShieldCheck className="w-3 h-3 text-amber-400" /> Root Admin
+                            </span>
+                          ) : (
+                            <div className="flex items-center rounded-xl border border-[#1c1c1c] bg-[#0c0c0c] p-0.5 text-[11px] font-mono">
+                              <button
+                                type="button"
+                                onClick={() => handleQuickSetRole(u, 'user')}
+                                className={`px-2.5 py-1 rounded-lg transition-all ${
+                                  !isAdmin
+                                    ? 'bg-[#1e1e1e] text-white font-semibold shadow'
+                                    : 'text-gray-400 hover:text-gray-200'
+                                }`}
+                                title="Definir como Usuário Comum"
+                              >
+                                Usuário
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickSetRole(u, 'admin')}
+                                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                                  isAdmin
+                                    ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/40 shadow'
+                                    : 'text-gray-400 hover:text-amber-400'
+                                }`}
+                                title="Promover para Administrador"
+                              >
+                                <ShieldCheck className="w-3 h-3" />
+                                Admin
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Quick Suspend / Block Toggle Button */}
+                          {!isMalaca && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickToggleBan(u)}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all border shadow-sm ${
+                                u.is_banned
+                                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 hover:bg-rose-500/30'
+                                  : 'bg-[#0a0a0a] border-[#1c1c1c] text-gray-400 hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/10'
+                              }`}
+                              title={u.is_banned ? 'Clique para desbloquear usuário' : 'Clique para suspender/bloquear usuário'}
+                            >
+                              {u.is_banned ? (
+                                <>
+                                  <Unlock className="w-3.5 h-3.5 text-rose-300" />
+                                  <span>Desbloquear</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Lock className="w-3.5 h-3.5" />
+                                  <span>Suspender</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
+                          {/* Password Reset */}
                           <button
                             type="button"
                             onClick={() => {
@@ -943,6 +1055,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                             <Key className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* Edit Full User Modal */}
                           <button
                             type="button"
                             onClick={() => {
@@ -953,11 +1066,12 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                               setEditIsBanned(Boolean(u.is_banned));
                             }}
                             className="p-2 rounded-xl text-gray-400 hover:text-brand-400 hover:bg-[#141414] border border-[#1c1c1c] transition-colors"
-                            title="Editar usuário"
+                            title="Editar usuário completo"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* Delete User */}
                           {!isMalaca && (
                             <button
                               type="button"

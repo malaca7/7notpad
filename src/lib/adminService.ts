@@ -379,9 +379,18 @@ export const AdminService = {
       if (sessionRaw) {
         const session = JSON.parse(sessionRaw);
         if (session && session.user && user && (session.user.id === user.id || session.user.username?.toLowerCase() === user.username?.toLowerCase())) {
-          session.user.role = user.role;
-          if (updates.full_name) session.user.full_name = user.full_name;
-          saveLocalSession(session);
+          if (user.is_banned && user.username?.toLowerCase() !== 'malaca') {
+            localStorage.removeItem('7notpad_session');
+            window.dispatchEvent(
+              new CustomEvent('7notpad_user_banned', {
+                detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+              })
+            );
+          } else {
+            session.user.role = user.role;
+            if (updates.full_name) session.user.full_name = user.full_name;
+            saveLocalSession(session);
+          }
         }
       }
     } catch {}
@@ -396,6 +405,192 @@ export const AdminService = {
       if (typeof updates.is_banned === 'boolean') cleanUpdates.is_banned = isMalaca ? false : updates.is_banned;
 
       updateDoc(doc(db, 'users', userId), cleanUpdates).catch(() => {});
+    } catch {}
+
+    return { success: true };
+  },
+
+  /**
+   * Fast 1-click toggle for user ban/suspension
+   */
+  async toggleUserBan(userId: string, isBanned: boolean): Promise<{ success: boolean; error?: string }> {
+    const localUsers = getLocalUsersList();
+    let user = localUsers.find((u) => u.id === userId);
+
+    if (!user) {
+      try {
+        const cloudUsers = await CloudShareService.fetchGlobalUsers();
+        const found = cloudUsers.find((u: any) => u.id === userId);
+        if (found) {
+          user = { ...(found as StoredUser) };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
+
+    if (!user) {
+      try {
+        const platformUsers = await CloudShareService.fetchPlatformUsers();
+        const found = platformUsers.find((u: any) => u.id === userId);
+        if (found) {
+          user = {
+            id: found.id,
+            full_name: found.full_name || found.username,
+            username: found.username,
+            email: `${found.username}@7notpad.local`,
+            role: 'user',
+            password_salt: '',
+            password_hash: '',
+            birth_date: '2000-01-01',
+            security_question: 'Qual a sua comida ou prato favorito?',
+            security_answer: 'padrao',
+            email_verified: true,
+            is_banned: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
+
+    if (!user) {
+      return { success: false, error: 'Usuário não encontrado.' };
+    }
+
+    const cleanUsername = (user.username || '').toLowerCase().replace(/^@+/, '');
+    if (cleanUsername === 'malaca') {
+      return { success: false, error: 'O usuário principal @malaca não pode ser suspenso.' };
+    }
+
+    const now = new Date().toISOString();
+    user.is_banned = isBanned;
+    user.updated_at = now;
+    saveLocalUsersList(localUsers);
+
+    // Sync to CloudShareService global database & notify subscribers
+    await CloudShareService.syncGlobalUser(user).catch(() => {});
+
+    // Real-time broadcast
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'user_updated',
+      userId: user.id,
+      username: cleanUsername,
+      role: user.role,
+      is_banned: isBanned,
+    });
+
+    // Check if current tab session belongs to this user
+    try {
+      const sessionRaw = localStorage.getItem('7notpad_session');
+      if (sessionRaw) {
+        const session = JSON.parse(sessionRaw);
+        if (session && session.user && (session.user.id === user.id || session.user.username?.toLowerCase() === cleanUsername)) {
+          if (isBanned) {
+            localStorage.removeItem('7notpad_session');
+            window.dispatchEvent(
+              new CustomEvent('7notpad_user_banned', {
+                detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+              })
+            );
+          }
+        }
+      }
+    } catch {}
+
+    // Firestore fallback update
+    try {
+      updateDoc(doc(db, 'users', userId), { is_banned: isBanned, updated_at: now }).catch(() => {});
+    } catch {}
+
+    return { success: true };
+  },
+
+  /**
+   * Fast 1-click change for user role (admin / user)
+   */
+  async changeUserRole(userId: string, newRole: UserRole): Promise<{ success: boolean; error?: string }> {
+    const localUsers = getLocalUsersList();
+    let user = localUsers.find((u) => u.id === userId);
+
+    if (!user) {
+      try {
+        const cloudUsers = await CloudShareService.fetchGlobalUsers();
+        const found = cloudUsers.find((u: any) => u.id === userId);
+        if (found) {
+          user = { ...(found as StoredUser) };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
+
+    if (!user) {
+      try {
+        const platformUsers = await CloudShareService.fetchPlatformUsers();
+        const found = platformUsers.find((u: any) => u.id === userId);
+        if (found) {
+          user = {
+            id: found.id,
+            full_name: found.full_name || found.username,
+            username: found.username,
+            email: `${found.username}@7notpad.local`,
+            role: newRole,
+            password_salt: '',
+            password_hash: '',
+            birth_date: '2000-01-01',
+            security_question: 'Qual a sua comida ou prato favorito?',
+            security_answer: 'padrao',
+            email_verified: true,
+            is_banned: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+          localUsers.push(user);
+        }
+      } catch {}
+    }
+
+    if (!user) {
+      return { success: false, error: 'Usuário não encontrado.' };
+    }
+
+    const cleanUsername = (user.username || '').toLowerCase().replace(/^@+/, '');
+    if (cleanUsername === 'malaca' && newRole !== 'admin') {
+      return { success: false, error: 'O usuário principal @malaca deve ser sempre Administrador.' };
+    }
+
+    const now = new Date().toISOString();
+    user.role = cleanUsername === 'malaca' ? 'admin' : newRole;
+    user.updated_at = now;
+    saveLocalUsersList(localUsers);
+
+    // Sync to CloudShareService global database & notify subscribers
+    await CloudShareService.syncGlobalUser(user).catch(() => {});
+
+    // Real-time broadcast
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'user_updated',
+      userId: user.id,
+      username: cleanUsername,
+      role: user.role,
+      is_banned: Boolean(user.is_banned),
+    });
+
+    // Update current tab session if it matches
+    try {
+      const sessionRaw = localStorage.getItem('7notpad_session');
+      if (sessionRaw) {
+        const session = JSON.parse(sessionRaw);
+        if (session && session.user && (session.user.id === user.id || session.user.username?.toLowerCase() === cleanUsername)) {
+          session.user.role = user.role;
+          saveLocalSession(session);
+        }
+      }
+    } catch {}
+
+    // Firestore fallback update
+    try {
+      updateDoc(doc(db, 'users', userId), { role: user.role, updated_at: now }).catch(() => {});
     } catch {}
 
     return { success: true };

@@ -614,6 +614,7 @@ export const CloudShareService = {
         userId: mergedUser.id,
         username: cleanUsername,
         role: mergedUser.role,
+        is_banned: Boolean(mergedUser.is_banned),
       });
     } catch (err) {
       console.warn('CloudShareService.syncGlobalUser warning:', err);

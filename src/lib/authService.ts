@@ -207,6 +207,11 @@ export const AuthService = {
       if (session && session.user) {
         if (session.user.username?.toLowerCase() === 'malaca') {
           session.user.role = 'admin';
+          session.user.is_banned = false;
+        } else if (session.user.is_banned) {
+          // Banned user session is revoked immediately
+          localStorage.removeItem(AUTH_SESSION_KEY);
+          return null;
         }
       }
       return session;
@@ -220,6 +225,9 @@ export const AuthService = {
     if (!session || !session.user) return null;
     if (session.user.username?.toLowerCase() === 'malaca') {
       session.user.role = 'admin';
+      session.user.is_banned = false;
+    } else if (session.user.is_banned) {
+      return null;
     }
     return session.user;
   },
@@ -232,12 +240,29 @@ export const AuthService = {
     if (cleanUsername === 'malaca') {
       if (session.user.role !== 'admin') {
         session.user.role = 'admin';
+        session.user.is_banned = false;
         saveLocalSession(session);
       }
       return session.user;
     }
 
     try {
+      // 1. Check local users database first
+      const localUsers = getLocalUsers();
+      const localMatch = localUsers.find(
+        (u) => u.id === session.user.id || (u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanUsername)
+      );
+      if (localMatch && Boolean(localMatch.is_banned)) {
+        this.logout();
+        window.dispatchEvent(
+          new CustomEvent('7notpad_user_banned', {
+            detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+          })
+        );
+        return null;
+      }
+
+      // 2. Check cloud global users database
       const cloudUsers = await CloudShareService.fetchGlobalUsers();
       const match = cloudUsers.find(
         (u: any) =>
@@ -245,9 +270,20 @@ export const AuthService = {
           (u.username && u.username.toLowerCase().replace(/^@+/, '') === cleanUsername)
       );
 
-      if (match && match.role && match.role !== session.user.role) {
-        session.user.role = match.role;
-        saveLocalSession(session);
+      if (match) {
+        if (Boolean(match.is_banned)) {
+          this.logout();
+          window.dispatchEvent(
+            new CustomEvent('7notpad_user_banned', {
+              detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+            })
+          );
+          return null;
+        }
+        if (match.role && match.role !== session.user.role) {
+          session.user.role = match.role;
+          saveLocalSession(session);
+        }
       }
     } catch {}
 
@@ -725,32 +761,34 @@ export const AuthService = {
         u => u.username.toLowerCase() === username || (u.email && u.email.toLowerCase() === username)
       );
 
-      // 2. If not local or if local user is missing password credentials, fetch from CloudShareService
-      if (!user || !user.password_salt || !user.password_hash) {
-        try {
-          const cloudUsers = await CloudShareService.fetchGlobalUsers();
-          const match = cloudUsers.find(
-            (u: any) =>
-              u.username?.toLowerCase() === username || (u.email && u.email?.toLowerCase() === username)
-          );
-          if (match) {
-            const merged: StoredUser = {
-              ...(user || {}),
-              ...(match as StoredUser),
-              password_salt: match.password_salt || user?.password_salt,
-              password_hash: match.password_hash || user?.password_hash,
-            };
-            user = merged;
-            const idx = localUsers.findIndex(u => u.id === merged.id || u.username.toLowerCase() === username);
-            if (idx >= 0) {
-              localUsers[idx] = merged;
-            } else {
-              localUsers.push(merged);
-            }
-            saveLocalUsers(localUsers);
+      // 2. Fetch latest status from CloudShareService to ensure ban status, role, and credentials are fresh
+      try {
+        const cloudUsers = await CloudShareService.fetchGlobalUsers();
+        const match = cloudUsers.find(
+          (u: any) =>
+            (user && u.id === user.id) ||
+            u.username?.toLowerCase() === username ||
+            (u.email && u.email?.toLowerCase() === username)
+        );
+        if (match) {
+          const merged: StoredUser = {
+            ...(user || {}),
+            ...(match as StoredUser),
+            password_salt: match.password_salt || user?.password_salt || '',
+            password_hash: match.password_hash || user?.password_hash || '',
+            is_banned: match.is_banned !== undefined ? Boolean(match.is_banned) : Boolean(user?.is_banned),
+            role: match.role || user?.role || 'user',
+          };
+          user = merged;
+          const idx = localUsers.findIndex(u => u.id === merged.id || u.username.toLowerCase() === username);
+          if (idx >= 0) {
+            localUsers[idx] = merged;
+          } else {
+            localUsers.push(merged);
           }
-        } catch {}
-      }
+          saveLocalUsers(localUsers);
+        }
+      } catch {}
 
       // 3. Fallback check in Firestore if configured
       if (!user) {

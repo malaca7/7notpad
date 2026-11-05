@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ToastProvider } from './components/common/Toast';
+import { ToastProvider, useToast } from './components/common/Toast';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar } from './components/layout/Sidebar';
 import { NoteEditor } from './components/editor/NoteEditor';
@@ -44,6 +44,17 @@ export function MainLayout() {
   const [platformLimits, setPlatformLimits] = useState<PlatformLimits>(() => PlatformSettingsService.getLimits());
   const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
   const [mobileCopiedLink, setMobileCopiedLink] = useState(false);
+  const { error: toastError } = useToast();
+
+  // Listen to account suspension event
+  useEffect(() => {
+    const handleBanned = (e: any) => {
+      toastError('Acesso Suspenso', e.detail?.message || 'Sua conta de usuário foi suspensa pela administração.');
+      setIsAdminModalOpen(false);
+    };
+    window.addEventListener('7notpad_user_banned', handleBanned);
+    return () => window.removeEventListener('7notpad_user_banned', handleBanned);
+  }, [toastError]);
 
   // Sync and subscribe to platform limits (local storage + cloud real-time broadcast)
   useEffect(() => {
@@ -93,11 +104,12 @@ export function MainLayout() {
   }, [isAdmin]);
 
   const handleMobileCopyLink = async () => {
-    if (!activeNoteId) return;
+    if (!activeNote || !activeNote.share?.is_active) return;
     try {
       const baseUrl = (import.meta as any).env?.BASE_URL || '/';
       const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
-      const url = `${window.location.origin}${cleanBase}/notpad/${activeNoteId}`;
+      const slug = activeNote.share.custom_slug || activeNote.id;
+      const url = `${window.location.origin}${cleanBase}/notpad/${slug}`;
       await navigator.clipboard.writeText(url);
       setMobileCopiedLink(true);
       setTimeout(() => setMobileCopiedLink(false), 2000);
@@ -499,11 +511,11 @@ export function MainLayout() {
           </button>
         )}
 
-        {activeNote && (
+        {activeNote && activeNote.share?.is_active && (
           <button
             type="button"
             onClick={handleMobileCopyLink}
-            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium text-gray-400 active:text-white transition-colors"
+            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-medium text-cyan-400 active:text-cyan-200 transition-colors"
           >
             {mobileCopiedLink ? (
               <Check className="w-4 h-4 text-emerald-400" />

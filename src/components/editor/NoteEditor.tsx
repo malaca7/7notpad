@@ -49,7 +49,8 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const getNoteUrl = () => {
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
     const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
-    return `${window.location.origin}${cleanBase}/notpad/${note.id}`;
+    const slug = note.share?.custom_slug || note.id;
+    return `${window.location.origin}${cleanBase}/notpad/${slug}`;
   };
 
   const handleCopyNoteUrl = async () => {
@@ -199,21 +200,23 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
 
         {/* Header Right Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Quick Copy Unique Note URL Pill */}
-          <button
-            type="button"
-            onClick={handleCopyNoteUrl}
-            title={`Copiar URL única: ${getNoteUrl()}`}
-            className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border border-[#1c1c1c] bg-[#0a0a0a] hover:bg-[#141414] text-[11px] font-mono text-gray-400 transition-colors"
-          >
-            <span className="hidden md:inline truncate max-w-[200px]">/notpad/{note.id}</span>
-            <span className="md:hidden">Link</span>
-            {copiedUrl ? (
-              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-            ) : (
-              <Copy className="w-3.5 h-3.5 text-brand-400 shrink-0" />
-            )}
-          </button>
+          {/* Quick Copy Unique Note URL Pill - ONLY SHOWN WHEN NOTE IS ACTIVELY SHARED */}
+          {isShared && (
+            <button
+              type="button"
+              onClick={handleCopyNoteUrl}
+              title={`Copiar Link Compartilhado: ${getNoteUrl()}`}
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-[11px] font-mono text-cyan-300 transition-colors shadow-sm"
+            >
+              <span className="hidden md:inline truncate max-w-[200px]">/notpad/{note.share?.custom_slug || note.id}</span>
+              <span className="md:hidden">Link</span>
+              {copiedUrl ? (
+                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              ) : (
+                <Copy className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              )}
+            </button>
+          )}
 
           {/* Pin Button */}
           {onTogglePin && (
