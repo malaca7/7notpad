@@ -689,13 +689,21 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                         className="p-3.5 sm:p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-[#080808] transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
-                            isAdmin 
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' 
-                              : 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
-                          }`}>
-                            {u.full_name ? u.full_name[0].toUpperCase() : 'U'}
-                          </div>
+                          {u.avatar_url ? (
+                            <img
+                              src={u.avatar_url}
+                              alt={u.full_name}
+                              className="w-9 h-9 rounded-xl object-cover border border-[#1c1c1c] shrink-0"
+                            />
+                          ) : (
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isAdmin 
+                                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' 
+                                : 'bg-brand-500/10 text-brand-400 border border-brand-500/20'
+                            }`}>
+                              {u.full_name ? u.full_name[0].toUpperCase() : 'U'}
+                            </div>
+                          )}
 
                           <div>
                             <div className="flex items-center gap-2 flex-wrap">

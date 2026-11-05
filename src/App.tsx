@@ -17,6 +17,7 @@ import { useAuth } from './hooks/useAuth';
 import { isUserAdmin } from './types/auth';
 import { PlatformSettingsService, type PlatformLimits } from './lib/platformSettings';
 import { getLocalNotes } from './lib/storage';
+import { CloudShareService } from './lib/cloudShare';
 import { FileText, Plus, Share2, Copy, Check, Settings, Home, ShieldCheck, Megaphone } from 'lucide-react';
 
 export function MainLayout() {
@@ -49,6 +50,22 @@ export function MainLayout() {
     PlatformSettingsService.fetchLimits().then(setPlatformLimits);
     return PlatformSettingsService.subscribe(setPlatformLimits);
   }, []);
+
+  // Sync active user profile to global cloud directory
+  useEffect(() => {
+    if (user) {
+      CloudShareService.syncGlobalUser({
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        email: user.email,
+        avatar_url: user.avatar_url,
+        role: user.role,
+        birth_date: user.birth_date,
+        security_question: user.security_question,
+      }).catch(() => {});
+    }
+  }, [user]);
 
   // Admin route check: /admin or #admin
   useEffect(() => {

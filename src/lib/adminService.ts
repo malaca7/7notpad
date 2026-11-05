@@ -8,6 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { type StoredUser } from './authService';
+import { CloudShareService } from './cloudShare';
 import { generateSalt, hashPassword } from './crypto';
 import { getLocalNotes, saveLocalNotes } from './storage';
 import { PlatformSettingsService, type PlatformLimits } from './platformSettings';
@@ -66,11 +67,13 @@ export const AdminService = {
   // ----------------------------------------------------
   async getAllUsers(): Promise<UserProfile[]> {
     const userMap = new Map<string, UserProfile>();
+    const storedUserMap = new Map<string, StoredUser>();
 
     // 1. Load local users
     const localUsers = getLocalUsersList();
     for (const u of localUsers) {
       const isMalaca = u.username.toLowerCase() === 'malaca';
+      storedUserMap.set(u.id, u);
       userMap.set(u.id, {
         id: u.id,
         full_name: u.full_name,
@@ -87,7 +90,95 @@ export const AdminService = {
       });
     }
 
-    // Ensure @malaca is always present in users
+    // 2. Fetch full global cloud users database
+    try {
+      const cloudUsers = await CloudShareService.fetchGlobalUsers();
+      if (Array.isArray(cloudUsers) && cloudUsers.length > 0) {
+        for (const data of cloudUsers) {
+          if (data && data.username) {
+            const isMalaca = data.username.toLowerCase() === 'malaca';
+            const id = data.id || `usr_${data.username}`;
+            storedUserMap.set(id, data as StoredUser);
+            userMap.set(id, {
+              id,
+              full_name: data.full_name || data.username,
+              username: data.username,
+              email: data.email || `${data.username}@7notpad.local`,
+              avatar_url: data.avatar_url,
+              role: isMalaca ? 'admin' : (data.role || 'user'),
+              birth_date: data.birth_date,
+              security_question: data.security_question,
+              email_verified: true,
+              is_banned: isMalaca ? false : Boolean(data.is_banned),
+              created_at: data.created_at || new Date().toISOString(),
+              updated_at: data.updated_at || new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch {}
+
+    // 3. Check public platform users directory (recovers users registered across all browsers)
+    try {
+      const platformDirectory = await CloudShareService.fetchPlatformUsers();
+      for (const dirUser of platformDirectory) {
+        if (dirUser && dirUser.username) {
+          const cleanUser = dirUser.username.toLowerCase();
+          const alreadyInMap = Array.from(userMap.values()).some(
+            (u) => u.username.toLowerCase() === cleanUser
+          );
+          if (!alreadyInMap) {
+            const isMalaca = cleanUser === 'malaca';
+            const id = dirUser.id || `usr_${cleanUser}`;
+            userMap.set(id, {
+              id,
+              full_name: dirUser.full_name || dirUser.username,
+              username: dirUser.username,
+              email: `${cleanUser}@7notpad.local`,
+              role: isMalaca ? 'admin' : 'user',
+              email_verified: true,
+              is_banned: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch {}
+
+    // 4. Also non-blocking fetch from Firestore if configured
+    try {
+      const snap = await Promise.race([
+        getDocs(collection(db, 'users')),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+      ]);
+
+      if (snap && !snap.empty) {
+        snap.forEach((d) => {
+          const data = d.data() as Partial<StoredUser>;
+          if (data && data.username) {
+            const isMalaca = data.username.toLowerCase() === 'malaca';
+            const id = data.id || d.id;
+            userMap.set(id, {
+              id,
+              full_name: data.full_name || data.username,
+              username: data.username,
+              email: data.email || `${data.username}@7notpad.local`,
+              avatar_url: data.avatar_url,
+              role: isMalaca ? 'admin' : (data.role || 'user'),
+              birth_date: data.birth_date,
+              security_question: data.security_question,
+              email_verified: true,
+              is_banned: isMalaca ? false : Boolean(data.is_banned),
+              created_at: data.created_at || new Date().toISOString(),
+              updated_at: data.updated_at || new Date().toISOString(),
+            });
+          }
+        });
+      }
+    } catch {}
+
+    // Ensure @malaca is always present in users and is admin
     let malacaFound = false;
     for (const u of userMap.values()) {
       if (u.username.toLowerCase() === 'malaca') {
@@ -114,36 +205,10 @@ export const AdminService = {
       });
     }
 
-    // 2. Fetch cloud users (non-blocking with timeout)
-    try {
-      const snap = await Promise.race([
-        getDocs(collection(db, 'users')),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
-      ]);
-
-      if (snap && !snap.empty) {
-        snap.forEach((d) => {
-          const data = d.data() as Partial<StoredUser>;
-          if (data && data.username) {
-            const isMalaca = data.username.toLowerCase() === 'malaca';
-            userMap.set(data.id || d.id, {
-              id: data.id || d.id,
-              full_name: data.full_name || data.username,
-              username: data.username,
-              email: data.email || `${data.username}@7notpad.local`,
-              avatar_url: data.avatar_url,
-              role: isMalaca ? 'admin' : (data.role || 'user'),
-              birth_date: data.birth_date,
-              security_question: data.security_question,
-              email_verified: true,
-              is_banned: isMalaca ? false : Boolean(data.is_banned),
-              created_at: data.created_at || new Date().toISOString(),
-              updated_at: data.updated_at || new Date().toISOString(),
-            });
-          }
-        });
-      }
-    } catch {}
+    // Keep local cache synced with all discovered users
+    if (storedUserMap.size > 0) {
+      saveLocalUsersList(Array.from(storedUserMap.values()));
+    }
 
     return Array.from(userMap.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -201,12 +266,12 @@ export const AdminService = {
     localUsers.push(storedUser);
     saveLocalUsersList(localUsers);
 
-    // Sync to Firestore
+    // Sync to CloudShareService global database immediately!
+    await CloudShareService.syncGlobalUser(storedUser).catch(() => {});
+
+    // Sync to Firestore non-blocking
     try {
-      await Promise.race([
-        setDoc(doc(db, 'users', userId), storedUser),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      setDoc(doc(db, 'users', userId), storedUser).catch(() => {});
     } catch {}
 
     const profile: UserProfile = {
@@ -260,9 +325,12 @@ export const AdminService = {
       if (typeof updates.is_banned === 'boolean') user.is_banned = isMalaca ? false : updates.is_banned;
       user.updated_at = now;
       saveLocalUsersList(localUsers);
+
+      // Sync to CloudShareService global database!
+      await CloudShareService.syncGlobalUser(user).catch(() => {});
     }
 
-    // Update in Firestore
+    // Update in Firestore non-blocking
     try {
       const cleanUpdates: any = { updated_at: now };
       if (updates.full_name) cleanUpdates.full_name = updates.full_name.trim();
@@ -271,10 +339,7 @@ export const AdminService = {
       if (updates.role) cleanUpdates.role = isMalaca ? 'admin' : updates.role;
       if (typeof updates.is_banned === 'boolean') cleanUpdates.is_banned = isMalaca ? false : updates.is_banned;
 
-      await Promise.race([
-        updateDoc(doc(db, 'users', userId), cleanUpdates),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      updateDoc(doc(db, 'users', userId), cleanUpdates).catch(() => {});
     } catch {}
 
     return { success: true };
@@ -296,17 +361,17 @@ export const AdminService = {
       user.password_hash = hash;
       user.updated_at = now;
       saveLocalUsersList(localUsers);
+
+      // Sync updated password to CloudShareService global database!
+      await CloudShareService.syncGlobalUser(user).catch(() => {});
     }
 
     try {
-      await Promise.race([
-        updateDoc(doc(db, 'users', userId), {
-          password_salt: salt,
-          password_hash: hash,
-          updated_at: now,
-        }),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      updateDoc(doc(db, 'users', userId), {
+        password_salt: salt,
+        password_hash: hash,
+        updated_at: now,
+      }).catch(() => {});
     } catch {}
 
     return { success: true };
@@ -323,11 +388,11 @@ export const AdminService = {
     const filtered = localUsers.filter((u) => u.id !== userId);
     saveLocalUsersList(filtered);
 
+    // Delete from CloudShareService global database & public directory!
+    await CloudShareService.deleteGlobalUser(userId).catch(() => {});
+
     try {
-      await Promise.race([
-        deleteDoc(doc(db, 'users', userId)),
-        new Promise<null>((res) => setTimeout(() => res(null), 1500)),
-      ]);
+      deleteDoc(doc(db, 'users', userId)).catch(() => {});
     } catch {}
 
     return { success: true };

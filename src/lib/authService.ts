@@ -339,12 +339,14 @@ export const AuthService = {
         return { success: false, error: 'Este nome de usuário (@' + username + ') já está em uso. Escolha outro.' };
       }
 
-      // 2. Fast check in Firestore with timeout (if online and configured)
+      // 2. Check uniqueness in Cloud users database & platform directory
       try {
-        const usersRef = collection(db, 'users');
-        const usernameQuery = query(usersRef, where('username', '==', username));
-        const usernameSnap = await withTimeout(getDocs(usernameQuery), 1200);
-        if (usernameSnap && !usernameSnap.empty) {
+        const cloudUsers = await CloudShareService.fetchGlobalUsers();
+        if (cloudUsers.some((u: any) => u.username?.toLowerCase() === username)) {
+          return { success: false, error: 'Este nome de usuário (@' + username + ') já está em uso. Escolha outro.' };
+        }
+        const platformUsers = await CloudShareService.fetchPlatformUsers();
+        if (platformUsers.some((u) => u.username.toLowerCase() === username)) {
           return { success: false, error: 'Este nome de usuário (@' + username + ') já está em uso. Escolha outro.' };
         }
       } catch (err) {
@@ -379,12 +381,8 @@ export const AuthService = {
       localUsers.push(newUser);
       saveLocalUsers(localUsers);
 
-      // Replicate to Cloud directory & Firestore in background without blocking execution
-      CloudShareService.syncPlatformUser({
-        id: userId,
-        username,
-        full_name: fullName,
-      }).catch(() => {});
+      // Replicate to global cloud users database & public directory immediately!
+      await CloudShareService.syncGlobalUser(newUser).catch(() => {});
       withTimeout(setDoc(doc(db, 'users', userId), newUser), 1500).catch(() => {});
 
       // 4. Create and start authenticated session immediately!
@@ -566,6 +564,7 @@ export const AuthService = {
         user.email_verified = true;
         user.updated_at = now.toISOString();
         saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
         // Sync user verification to Firestore in background
         withTimeout(updateDoc(doc(db, 'users', user.id), { email_verified: true, updated_at: now.toISOString() }), 1000).catch(() => {});
@@ -603,6 +602,7 @@ export const AuthService = {
           user.email = newEmail;
           user.updated_at = now.toISOString();
           saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
         }
 
         const currentSession = this.getCurrentSession();
@@ -695,18 +695,36 @@ export const AuthService = {
         u => u.username.toLowerCase() === username || (u.email && u.email.toLowerCase() === username)
       );
 
-      // 2. If not local, fast check in Firestore
+      // 2. If not local, check CloudShareService global cloud users database
+      if (!user) {
+        try {
+          const cloudUsers = await CloudShareService.fetchGlobalUsers();
+          const match = cloudUsers.find(
+            (u: any) =>
+              u.username?.toLowerCase() === username || (u.email && u.email?.toLowerCase() === username)
+          );
+          if (match) {
+            user = match as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
+          }
+        } catch {}
+      }
+
+      // 3. Fallback check in Firestore if configured
       if (!user) {
         try {
           const usersRef = collection(db, 'users');
-          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', username))), 1500);
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', username))), 1200);
           if (!snap || snap.empty) {
-            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', username))), 1500);
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', username))), 1200);
           }
           if (snap && !snap.empty) {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -773,22 +791,42 @@ export const AuthService = {
     }
 
     try {
+      // 1. Check local users first
       const localUsers = getLocalUsers();
       let user = localUsers.find(
         u => u.username.toLowerCase() === ident || (u.email && u.email.toLowerCase() === ident)
       );
 
+      // 2. If not local, check CloudShareService global cloud users database
+      if (!user) {
+        try {
+          const cloudUsers = await CloudShareService.fetchGlobalUsers();
+          const match = cloudUsers.find(
+            (u: any) =>
+              u.username?.toLowerCase() === ident || (u.email && u.email?.toLowerCase() === ident)
+          );
+          if (match) {
+            user = match as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
+          }
+        } catch {}
+      }
+
+      // 3. Fallback check in Firestore if configured
       if (!user) {
         try {
           const usersRef = collection(db, 'users');
-          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1500);
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1200);
           if (!snap || snap.empty) {
-            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1500);
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1200);
           }
           if (snap && !snap.empty) {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -840,22 +878,42 @@ export const AuthService = {
     }
 
     try {
+      // 1. Check local users first
       const localUsers = getLocalUsers();
       let user = localUsers.find(
         u => u.username.toLowerCase() === ident || (u.email && u.email.toLowerCase() === ident)
       );
 
+      // 2. If not local, check CloudShareService global cloud users database
+      if (!user) {
+        try {
+          const cloudUsers = await CloudShareService.fetchGlobalUsers();
+          const match = cloudUsers.find(
+            (u: any) =>
+              u.username?.toLowerCase() === ident || (u.email && u.email?.toLowerCase() === ident)
+          );
+          if (match) {
+            user = match as StoredUser;
+            localUsers.push(user);
+            saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
+          }
+        } catch {}
+      }
+
+      // 3. Fallback check in Firestore if configured
       if (!user) {
         try {
           const usersRef = collection(db, 'users');
-          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1500);
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', ident))), 1200);
           if (!snap || snap.empty) {
-            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1500);
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', ident))), 1200);
           }
           if (snap && !snap.empty) {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -891,8 +949,10 @@ export const AuthService = {
       user.password_hash = newHash;
       user.updated_at = new Date().toISOString();
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
-      // Replicate to Firestore
+      // Replicate to Cloud global users & Firestore
+      CloudShareService.syncGlobalUser(user).catch(() => {});
       withTimeout(
         updateDoc(doc(db, 'users', user.id), {
           password_salt: newSalt,
@@ -960,6 +1020,7 @@ export const AuthService = {
       user.security_answer = cleanAnswer;
       user.updated_at = now;
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
       const session = this.getCurrentSession();
       if (session && session.user.id === userId) {
@@ -1018,6 +1079,7 @@ export const AuthService = {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -1122,6 +1184,7 @@ export const AuthService = {
       user.password_hash = newHash;
       user.updated_at = new Date().toISOString();
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
       withTimeout(updateDoc(doc(db, 'users', user.id), {
         password_salt: newSalt,
@@ -1191,6 +1254,7 @@ export const AuthService = {
       user.password_hash = newHash;
       user.updated_at = now.toISOString();
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
       withTimeout(updateDoc(doc(db, 'users', user.id), {
         password_salt: newSalt,
@@ -1233,6 +1297,7 @@ export const AuthService = {
       }
       user.updated_at = nowIso;
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
       const session = this.getCurrentSession();
       if (session && session.user.id === userId) {
@@ -1268,6 +1333,7 @@ export const AuthService = {
       user.avatar_url = avatarUrl || undefined;
       user.updated_at = nowIso;
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
       const session = this.getCurrentSession();
       if (session && session.user.id === userId) {
@@ -1376,6 +1442,7 @@ export const AuthService = {
       user.password_hash = newHash;
       user.updated_at = new Date().toISOString();
       saveLocalUsers(localUsers);
+      CloudShareService.syncGlobalUser(user).catch(() => {});
 
       withTimeout(updateDoc(doc(db, 'users', userId), {
         password_salt: newSalt,

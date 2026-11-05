@@ -418,6 +418,80 @@ export const CloudShareService = {
   },
 
   /**
+   * Save or update a full user profile in the global cloud users database
+   */
+  async syncGlobalUser(user: Record<string, any>): Promise<void> {
+    try {
+      const usersKey = '7notpad_global_users_store_v2';
+      let existingUsers: Record<string, any>[] = [];
+
+      const currentDoc = await fetchCloudDocument(usersKey);
+      if (currentDoc && Array.isArray(currentDoc.users)) {
+        existingUsers = currentDoc.users;
+      }
+
+      const cleanUsername = (user.username || '').trim().toLowerCase().replace(/^@+/, '');
+      const filtered = existingUsers.filter(
+        (u) => u.id !== user.id && u.username?.toLowerCase() !== cleanUsername
+      );
+      filtered.unshift({
+        ...user,
+        username: cleanUsername,
+        updated_at: user.updated_at || new Date().toISOString(),
+      });
+
+      await saveCloudDocument(usersKey, { users: filtered });
+
+      // Also keep public directory in sync
+      this.syncPlatformUser({
+        id: user.id,
+        username: cleanUsername,
+        full_name: user.full_name || cleanUsername,
+      }).catch(() => {});
+    } catch (err) {
+      console.warn('CloudShareService.syncGlobalUser warning:', err);
+    }
+  },
+
+  /**
+   * Fetch all registered users from the global cloud users database
+   */
+  async fetchGlobalUsers(): Promise<Record<string, any>[]> {
+    try {
+      const usersKey = '7notpad_global_users_store_v2';
+      const doc = await fetchCloudDocument(usersKey);
+      if (doc && Array.isArray(doc.users)) {
+        return doc.users;
+      }
+      return [];
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Delete a user from the global cloud users database
+   */
+  async deleteGlobalUser(userId: string): Promise<void> {
+    try {
+      const usersKey = '7notpad_global_users_store_v2';
+      const doc = await fetchCloudDocument(usersKey);
+      if (doc && Array.isArray(doc.users)) {
+        const remaining = doc.users.filter((u: any) => u.id !== userId);
+        await saveCloudDocument(usersKey, { users: remaining });
+      }
+
+      // Also remove from directory
+      const dirKey = '7notpad_users_directory_v2';
+      const dirDoc = await fetchCloudDocument(dirKey);
+      if (dirDoc && Array.isArray(dirDoc.users)) {
+        const remainingDir = dirDoc.users.filter((u: any) => u.id !== userId);
+        await saveCloudDocument(dirKey, { users: remainingDir });
+      }
+    } catch {}
+  },
+
+  /**
    * Fetch public platform users directory (@malaca + registered users)
    */
   async fetchPlatformUsers(): Promise<Array<{ id: string; username: string; full_name: string }>> {
