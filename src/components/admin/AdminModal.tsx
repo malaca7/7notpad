@@ -129,52 +129,67 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
   // Fetch all admin data
-  const loadAdminData = async () => {
+  const loadAdminData = async (refreshLimits = false) => {
     try {
-      const [freshStats, freshUsers, freshNotes, freshShares, freshLimits] = await Promise.all([
+      const promises: [
+        Promise<AdminStats>,
+        Promise<UserProfile[]>,
+        Promise<Note[]>,
+        Promise<Array<NoteShare & { note_title?: string }>>,
+        Promise<PlatformLimits | null>
+      ] = [
         AdminService.getStats(),
         AdminService.getAllUsers(),
         AdminService.getAllNotes(),
         AdminService.getAllShares(),
-        PlatformSettingsService.fetchLimits(),
-      ]);
+        refreshLimits ? PlatformSettingsService.fetchLimits() : Promise.resolve(null),
+      ];
+
+      const [freshStats, freshUsers, freshNotes, freshShares, freshLimits] = await Promise.all(promises);
       setStats(freshStats);
       setUsers(freshUsers);
       setNotes(freshNotes);
       setShares(freshShares);
-      setLimits(freshLimits);
+      if (freshLimits) {
+        setLimits(freshLimits);
+      }
     } catch (err: any) {
-      error('Erro ao carregar dados', err?.message || 'Falha ao sincronizar painel.');
+      if (refreshLimits) {
+        error('Erro ao carregar dados', err?.message || 'Falha ao sincronizar painel.');
+      }
     }
   };
 
   useEffect(() => {
     if (!isOpen) return;
-    loadAdminData();
+
+    // Load initial data including platform limits
+    loadAdminData(true);
 
     // Auto-sync in real time whenever any user creates/edits notes or accounts across the platform
-    const unsub = CloudShareService.subscribeToGlobalRealtimeEvents(() => {
-      loadAdminData();
+    const unsub = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
+      // If a settings update arrives from another admin, only update if not actively on broadcast/limits tab
+      if (event?.type === 'settings_updated') {
+        if (activeTab !== 'broadcast' && activeTab !== 'limits') {
+          PlatformSettingsService.fetchLimits().then(fresh => {
+            if (fresh) setLimits(fresh);
+          });
+        }
+      } else {
+        loadAdminData(false);
+      }
     });
 
-    // Auto-refresh automatically every 3.5s while admin modal is open
+    // Auto-refresh stats, users, notes, shares in the background (NEVER overwrite limits or form fields!)
     const pollInterval = setInterval(() => {
-      loadAdminData();
-    }, 3500);
-
-    const handleFocus = () => {
-      loadAdminData();
-    };
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleFocus);
+      loadAdminData(false);
+    }, 4000);
 
     return () => {
       unsub();
       clearInterval(pollInterval);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
     };
-  }, [isOpen]);
+  }, [isOpen, activeTab]);
 
   // Filtered Users
   const filteredUsers = useMemo(() => {
@@ -512,7 +527,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     } catch {}
   };
 
-  // Handlers for Platform Limits
+  // Handlers for Platform Limits & Broadcast
   const handleSaveLimits = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -520,6 +535,16 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       success('Regras e Limites Atualizados!', 'As novas configurações já estão valendo na plataforma.');
     } catch {
       error('Erro ao salvar regras');
+    }
+  };
+
+  const handleSaveBroadcast = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    try {
+      await AdminService.updatePlatformLimits(limits);
+      success('Aviso Global Salvo!', 'As alterações do banner foram salvas e transmitidas na plataforma.');
+    } catch {
+      error('Erro ao salvar aviso global');
     }
   };
 
@@ -1391,7 +1416,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         {/* TAB 5: TRANSMISSÃO DE AVISO GLOBAL (BANNER) */}
         {/* ==================================================== */}
         {activeTab === 'broadcast' && (
-          <form onSubmit={handleSaveLimits} className="space-y-4">
+          <form onSubmit={handleSaveBroadcast} className="space-y-4">
             {/* Broadcast Banner Control Center */}
             <div className="p-5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-4">
               {/* Header with Switch */}
