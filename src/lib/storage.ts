@@ -145,10 +145,10 @@ const WELCOME_NOTE_HTML = `
   <li><strong>Formatação Avançada:</strong> Digite em negrito, itálico, sublinhado, tachado, crie listas ordenadas, listas com marcadores e listas de tarefas.</li>
   <li><strong>Inserir Imagens &amp; Anexos:</strong> Adicione imagens diretamente pelo botão da barra de ferramentas ou anexe arquivos importantes (PDFs, documentos, etc).</li>
   <li><strong>Compartilhamento com Link Personalizado:</strong> Gere links no formato <code>7notpad.com/n/seu-link</code> e acesse de qualquer outro navegador ou celular!</li>
-  <li><strong>Totalmente Privado &amp; Automático:</strong> Suas alterações são salvas automaticamente na nuvem Firebase.</li>
+  <li><strong>Totalmente Privado &amp; Automático:</strong> Suas alterações são salvas automaticamente com sincronização em nuvem em tempo real.</li>
 </ul>
 <blockquote>
-  <p><strong>Nuvem Ativa:</strong> Suas notas agora contam com sincronização global no Firebase para links compartilhados funcionarem perfeitamente em qualquer dispositivo.</p>
+  <p><strong>Nuvem Ativa:</strong> Suas notas agora contam com sincronização global em tempo real para links compartilhados funcionarem perfeitamente em qualquer dispositivo.</p>
 </blockquote>
 `;
 

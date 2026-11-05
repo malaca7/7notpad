@@ -168,7 +168,7 @@ export const FirebaseService = {
       return { success: true };
     } catch (err: any) {
       console.warn('Firebase saveShare error:', err);
-      return { success: false, error: err?.message || 'Erro ao salvar no Firebase.' };
+      return { success: false, error: err?.message || 'Erro ao salvar na nuvem.' };
     }
   },
 

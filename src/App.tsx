@@ -11,13 +11,17 @@ import { BrowserWarningBanner } from './components/settings/BrowserWarningBanner
 import { AuthModal, type AuthModalView } from './components/auth/AuthModal';
 import { EmailNotificationToast } from './components/auth/EmailNotificationToast';
 import { LandingHome } from './components/home/LandingHome';
+import { AdminModal } from './components/admin/AdminModal';
 import { useNotes } from './hooks/useNotes';
 import { useAuth } from './hooks/useAuth';
+import { isUserAdmin } from './types/auth';
+import { PlatformSettingsService, type PlatformLimits } from './lib/platformSettings';
 import { getLocalNotes } from './lib/storage';
-import { FileText, Plus, Share2, Copy, Check, Settings, Home } from 'lucide-react';
+import { FileText, Plus, Share2, Copy, Check, Settings, Home, ShieldCheck, Megaphone } from 'lucide-react';
 
 export function MainLayout() {
   const { user, isAuthenticated } = useAuth();
+  const isAdmin = isUserAdmin(user);
   const {
     notes,
     activeNote,
@@ -35,8 +39,27 @@ export function MainLayout() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [platformLimits, setPlatformLimits] = useState<PlatformLimits>(() => PlatformSettingsService.getLimits());
   const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'email' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
   const [mobileCopiedLink, setMobileCopiedLink] = useState(false);
+
+  // Sync and subscribe to platform limits
+  useEffect(() => {
+    PlatformSettingsService.fetchLimits().then(setPlatformLimits);
+    return PlatformSettingsService.subscribe(setPlatformLimits);
+  }, []);
+
+  // Admin route check: /admin or #admin
+  useEffect(() => {
+    if (isAdmin) {
+      const path = window.location.pathname;
+      const hash = window.location.hash;
+      if (path.includes('/admin') || hash.includes('admin')) {
+        setIsAdminModalOpen(true);
+      }
+    }
+  }, [isAdmin]);
 
   const handleMobileCopyLink = async () => {
     if (!activeNoteId) return;
@@ -300,6 +323,14 @@ export function MainLayout() {
 
   return (
     <div className="flex flex-col h-[100dvh] w-screen bg-black text-gray-100 overflow-hidden font-sans">
+      {/* Global Broadcast Announcement Banner */}
+      {platformLimits.announcementActive && platformLimits.announcementBanner && (
+        <aside aria-label="Aviso Global" className="bg-gradient-to-r from-brand-600 via-cyan-600 to-brand-600 text-white text-xs py-1.5 px-4 text-center font-medium shadow-md flex items-center justify-center gap-2 shrink-0 z-30">
+          <Megaphone className="w-3.5 h-3.5 shrink-0" />
+          <span>{platformLimits.announcementBanner}</span>
+        </aside>
+      )}
+
       {/* Browser Data Persistence Notice */}
       <BrowserWarningBanner />
 
@@ -317,6 +348,8 @@ export function MainLayout() {
         totalNotes={notes.length}
         onGoToDashboard={handleGoToDashboard}
         isDashboard={!activeNoteId}
+        onOpenAdmin={() => setIsAdminModalOpen(true)}
+        isAdmin={isAdmin}
       />
 
       {/* Main Workspace Body */}
@@ -346,6 +379,8 @@ export function MainLayout() {
           onCloseMobile={() => setIsMobileSidebarOpen(false)}
           onGoToDashboard={handleGoToDashboard}
           isDashboard={!activeNoteId}
+          onOpenAdmin={() => setIsAdminModalOpen(true)}
+          isAdmin={isAdmin}
         />
 
         {/* Editor or Dashboard */}
@@ -444,6 +479,18 @@ export function MainLayout() {
           </button>
         )}
 
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setIsAdminModalOpen(true)}
+            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-xl text-[10px] font-bold text-amber-400 active:scale-95 transition-all"
+            title="Painel Admin"
+          >
+            <ShieldCheck className="w-4 h-4 text-amber-400" />
+            <span>Admin</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => {
@@ -456,6 +503,14 @@ export function MainLayout() {
           <span>Ajustes</span>
         </button>
       </nav>
+
+      {/* Admin Management Modal */}
+      <AdminModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        currentUser={user}
+        onNotesChanged={loadNotes}
+      />
 
       {/* Share Modal */}
       {activeNote && (

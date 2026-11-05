@@ -11,7 +11,8 @@ import {
   FileText,
   X,
   Sparkles,
-  Home
+  Home,
+  ShieldCheck
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
@@ -25,6 +26,8 @@ interface SidebarProps {
   isMobileOpen?: boolean;
   onGoToDashboard?: () => void;
   isDashboard?: boolean;
+  onOpenAdmin?: () => void;
+  isAdmin?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -37,6 +40,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isMobileOpen = false,
   onGoToDashboard,
   isDashboard = false,
+  onOpenAdmin,
+  isAdmin = false,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'pinned' | 'shared'>('all');
@@ -158,6 +163,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {isDashboard && (
                 <span className="ml-auto w-2 h-2 rounded-full bg-brand-400 animate-pulse"></span>
               )}
+            </button>
+          </div>
+        )}
+
+        {/* Admin Navigation */}
+        {isAdmin && onOpenAdmin && (
+          <div className="px-3 pt-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                onOpenAdmin();
+                if (onCloseMobile) onCloseMobile();
+              }}
+              className="w-full flex items-center gap-2.5 py-2 px-3 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-bold transition-all shadow-sm shadow-amber-500/10"
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>Painel Admin</span>
+              <span className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                ADMIN
+              </span>
             </button>
           </div>
         )}

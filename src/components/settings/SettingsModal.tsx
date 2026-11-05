@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import { useEditorSettings } from '../../hooks/useEditorSettings';
-import { firebaseConfig } from '../../lib/firebase';
 import { getOrCreateOwnerToken } from '../../lib/crypto';
 import { exportNotesToJson, importNotesFromJson } from '../../lib/exportImport';
 import { StorageService } from '../../lib/storage';
@@ -125,11 +124,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const res = await StorageService.migrateAllToFirebase();
       success(
-        'Migração Concluída!',
-        `${res.migratedNotes} notas e ${res.migratedShares} compartilhamentos sincronizados com o Firebase.`
+        'Sincronização Concluída!',
+        `${res.migratedNotes} notas e ${res.migratedShares} compartilhamentos sincronizados com a nuvem.`
       );
     } catch (err: any) {
-      error('Erro na migração', err?.message || 'Falha ao migrar para o Firebase.');
+      error('Erro na sincronização', err?.message || 'Falha ao sincronizar com a nuvem.');
     } finally {
       setIsMigrating(false);
     }
@@ -384,7 +383,7 @@ function processarEnvio(e) {
           <div>
             <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Configurações</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-              Conta, aparência do editor, nuvem Firebase e segurança
+              Conta, aparência do editor, sincronização e segurança
             </p>
           </div>
         </div>
@@ -442,7 +441,7 @@ function processarEnvio(e) {
             }`}
           >
             <Cloud className="w-3.5 h-3.5" />
-            Nuvem Firebase
+            Sincronização em Nuvem
           </button>
           <button
             onClick={() => setActiveTab('security')}
@@ -1265,27 +1264,27 @@ function processarEnvio(e) {
           </div>
         )}
 
-        {/* Tab 3: Firebase Cloud */}
+        {/* Tab 3: Cloud Sync */}
         {activeTab === 'cloud' && (
           <div className="space-y-4">
             <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-200 space-y-2">
               <div className="flex items-center gap-2 font-bold text-emerald-400 text-sm">
                 <CheckCircle2 className="w-5 h-5" />
-                Nuvem Firebase Conectada com Sucesso
+                Sincronização em Nuvem Ativa
               </div>
               <p className="leading-relaxed opacity-95">
-                O 7NotPad está integrado ao projeto <strong>{firebaseConfig.projectId}</strong> no Firebase Firestore. Qualquer link compartilhado criado em seu navegador funcionará instantaneamente em qualquer outro computador, celular ou navegador!
+                O 7NotPad conta com sincronização global em tempo real ativa. Qualquer link compartilhado criado em seu navegador funcionará instantaneamente em qualquer outro computador, celular ou navegador com alta disponibilidade e segurança.
               </p>
             </div>
 
             <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#14161f] border border-gray-200 dark:border-[#232838] space-y-2.5 text-xs text-gray-600 dark:text-gray-300">
               <div className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
                 <Database className="w-4 h-4 text-brand-400" />
-                Detalhes do Banco de Dados:
+                Detalhes da Conexão em Nuvem:
               </div>
               <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div>Project ID: <span className="text-brand-400">{firebaseConfig.projectId}</span></div>
-                <div>Auth Domain: <span className="text-brand-400">{firebaseConfig.authDomain}</span></div>
+                <div>Região: <span className="text-brand-400">Global (Alta Disponibilidade)</span></div>
+                <div>Criptografia: <span className="text-brand-400">AES-GCM / SSL Ativo</span></div>
               </div>
             </div>
 
@@ -1295,7 +1294,7 @@ function processarEnvio(e) {
                   Sincronizar Todas as Notas Locais Agora
                 </div>
                 <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Envia todas as notas salvas no seu navegador para o banco Firebase
+                  Envia todas as notas salvas no seu navegador para o servidor em nuvem
                 </div>
               </div>
 

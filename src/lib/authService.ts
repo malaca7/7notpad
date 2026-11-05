@@ -22,6 +22,7 @@ import { EmailService } from './emailService';
 import { CloudShareService } from './cloudShare';
 import type { 
   UserProfile, 
+  UserRole,
   AuthSession, 
   EmailVerificationCode, 
   PasswordResetToken, 
@@ -38,12 +39,14 @@ export interface StoredUser {
   full_name: string;
   username: string; // unique lowercase
   email: string;
+  role?: UserRole; // 'admin' | 'user'
   birth_date?: string; // YYYY-MM-DD
   security_question?: string;
   security_answer?: string; // normalized
   password_salt: string;
   password_hash: string;
   email_verified?: boolean;
+  is_banned?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -79,7 +82,14 @@ export function normalizeSecurityAnswer(str?: string): string {
 function getLocalUsers(): StoredUser[] {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const users: StoredUser[] = raw ? JSON.parse(raw) : [];
+    for (const u of users) {
+      if (u.username && u.username.toLowerCase() === 'malaca') {
+        u.role = 'admin';
+        u.is_banned = false;
+      }
+    }
+    return users;
   } catch {
     return [];
   }
@@ -192,7 +202,13 @@ export const AuthService = {
     try {
       const data = localStorage.getItem(AUTH_SESSION_KEY);
       if (!data) return null;
-      return JSON.parse(data) as AuthSession;
+      const session = JSON.parse(data) as AuthSession;
+      if (session && session.user) {
+        if (session.user.username?.toLowerCase() === 'malaca') {
+          session.user.role = 'admin';
+        }
+      }
+      return session;
     } catch {
       return null;
     }
@@ -200,7 +216,11 @@ export const AuthService = {
 
   getCurrentUser(): UserProfile | null {
     const session = this.getCurrentSession();
-    return session ? session.user : null;
+    if (!session || !session.user) return null;
+    if (session.user.username?.toLowerCase() === 'malaca') {
+      session.user.role = 'admin';
+    }
+    return session.user;
   },
 
   // Get list of platform users synchronously (always includes @malaca + registered local users)
@@ -335,18 +355,21 @@ export const AuthService = {
       const salt = generateSalt();
       const passwordHash = await hashPassword(password, salt);
       const now = new Date().toISOString();
+      const role: UserRole = username === 'malaca' ? 'admin' : ((params as any).role || 'user');
 
       const newUser: StoredUser = {
         id: userId,
         full_name: fullName,
         username,
         email: email || `${username}@7notpad.local`,
+        role,
         birth_date: birthDate,
         security_question: securityQuestion,
         security_answer: securityAnswer,
         password_salt: salt,
         password_hash: passwordHash,
         email_verified: true, // No email verification required!
+        is_banned: false,
         created_at: now,
         updated_at: now
       };
@@ -369,9 +392,11 @@ export const AuthService = {
         full_name: fullName,
         username,
         email: newUser.email,
+        role,
         birth_date: birthDate,
         security_question: securityQuestion,
         email_verified: true,
+        is_banned: false,
         created_at: now,
         updated_at: now
       };
@@ -695,15 +720,24 @@ export const AuthService = {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
+      // Check banned status
+      if (user.is_banned && user.username.toLowerCase() !== 'malaca') {
+        return { success: false, error: 'Esta conta de usuário foi suspensa pela administração.' };
+      }
+
+      const role: UserRole = user.username.toLowerCase() === 'malaca' ? 'admin' : (user.role || 'user');
+
       // No email confirmation blocker! Login immediately
       const profile: UserProfile = {
         id: user.id,
         full_name: user.full_name,
         username: user.username,
         email: user.email,
+        role,
         birth_date: user.birth_date,
         security_question: user.security_question,
         email_verified: true,
+        is_banned: user.username.toLowerCase() === 'malaca' ? false : Boolean(user.is_banned),
         created_at: user.created_at,
         updated_at: user.updated_at
       };

@@ -10,14 +10,25 @@ export const SECURITY_QUESTIONS = [
 
 export type SecurityQuestion = typeof SECURITY_QUESTIONS[number];
 
+export type UserRole = 'admin' | 'user';
+
+export function isUserAdmin(user?: UserProfile | null): boolean {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  const username = (user.username || '').replace(/^@/, '').trim().toLowerCase();
+  return username === 'malaca';
+}
+
 export interface UserProfile {
   id: string;
   full_name: string;
   username: string; // unique, lowercase
   email: string;
+  role?: UserRole; // 'admin' | 'user'
   birth_date?: string; // YYYY-MM-DD
   security_question?: string;
   email_verified?: boolean;
+  is_banned?: boolean;
   created_at: string;
   updated_at: string;
 }
