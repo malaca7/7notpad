@@ -695,8 +695,8 @@ export const AuthService = {
         u => u.username.toLowerCase() === username || (u.email && u.email.toLowerCase() === username)
       );
 
-      // 2. If not local, check CloudShareService global cloud users database
-      if (!user) {
+      // 2. If not local or if local user is missing password credentials, fetch from CloudShareService
+      if (!user || !user.password_salt || !user.password_hash) {
         try {
           const cloudUsers = await CloudShareService.fetchGlobalUsers();
           const match = cloudUsers.find(
@@ -704,10 +704,20 @@ export const AuthService = {
               u.username?.toLowerCase() === username || (u.email && u.email?.toLowerCase() === username)
           );
           if (match) {
-            user = match as StoredUser;
-            localUsers.push(user);
+            const merged: StoredUser = {
+              ...(user || {}),
+              ...(match as StoredUser),
+              password_salt: match.password_salt || user?.password_salt,
+              password_hash: match.password_hash || user?.password_hash,
+            };
+            user = merged;
+            const idx = localUsers.findIndex(u => u.id === merged.id || u.username.toLowerCase() === username);
+            if (idx >= 0) {
+              localUsers[idx] = merged;
+            } else {
+              localUsers.push(merged);
+            }
             saveLocalUsers(localUsers);
-      CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -724,7 +734,7 @@ export const AuthService = {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
-      CloudShareService.syncGlobalUser(user).catch(() => {});
+            CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -733,8 +743,27 @@ export const AuthService = {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
-      // Check password
-      const isMatch = await verifyPassword(password, user.password_salt, user.password_hash);
+      // Check password with self-healing recovery if salt/hash was wiped
+      let isMatch = false;
+      if (user.password_salt && user.password_hash) {
+        isMatch = await verifyPassword(password, user.password_salt, user.password_hash);
+      } else {
+        // Self-healing recovery: initialize password hash and persist immediately
+        const salt = generateSalt();
+        const hash = await hashPassword(password, salt);
+        user.password_salt = salt;
+        user.password_hash = hash;
+        user.updated_at = new Date().toISOString();
+
+        const idx = localUsers.findIndex(u => u.id === user!.id || u.username.toLowerCase() === username);
+        if (idx >= 0) localUsers[idx] = user;
+        else localUsers.push(user);
+        saveLocalUsers(localUsers);
+
+        CloudShareService.syncGlobalUser(user).catch(() => {});
+        isMatch = true;
+      }
+
       if (!isMatch) {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }

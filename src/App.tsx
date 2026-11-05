@@ -54,15 +54,10 @@ export function MainLayout() {
   // Sync active user profile to global cloud directory
   useEffect(() => {
     if (user) {
-      CloudShareService.syncGlobalUser({
+      CloudShareService.syncPlatformUser({
         id: user.id,
         username: user.username,
         full_name: user.full_name,
-        email: user.email,
-        avatar_url: user.avatar_url,
-        role: user.role,
-        birth_date: user.birth_date,
-        security_question: user.security_question,
       }).catch(() => {});
     }
   }, [user]);

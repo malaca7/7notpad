@@ -568,28 +568,41 @@ export const CloudShareService = {
       }
 
       const cleanUsername = (user.username || '').trim().toLowerCase().replace(/^@+/, '');
+      const existingUser = existingUsers.find(
+        (u) => u.id === user.id || u.username?.toLowerCase() === cleanUsername
+      );
       const filtered = existingUsers.filter(
         (u) => u.id !== user.id && u.username?.toLowerCase() !== cleanUsername
       );
-      filtered.unshift({
+
+      // Preserve credentials & security fields if caller passed partial profile object!
+      const mergedUser: Record<string, any> = {
+        ...(existingUser || {}),
         ...user,
+        id: user.id || existingUser?.id || `usr_${cleanUsername}`,
+        full_name: user.full_name || existingUser?.full_name || cleanUsername,
+        password_salt: user.password_salt || existingUser?.password_salt,
+        password_hash: user.password_hash || existingUser?.password_hash,
+        security_answer: user.security_answer || existingUser?.security_answer,
         username: cleanUsername,
         updated_at: user.updated_at || new Date().toISOString(),
-      });
+      };
+
+      filtered.unshift(mergedUser);
 
       await saveCloudDocument(usersKey, { users: filtered });
 
       // Also keep public directory in sync
       this.syncPlatformUser({
-        id: user.id,
+        id: mergedUser.id,
         username: cleanUsername,
-        full_name: user.full_name || cleanUsername,
+        full_name: mergedUser.full_name || cleanUsername,
       }).catch(() => {});
 
       // Broadcast user updated to all screens in real time
       publishGlobalRealtimeEvent({
         type: 'user_updated',
-        userId: user.id,
+        userId: mergedUser.id,
         username: cleanUsername,
       });
     } catch (err) {
