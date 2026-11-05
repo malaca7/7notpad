@@ -89,7 +89,11 @@ export function useNotes() {
   useEffect(() => {
     loadNotes();
 
-    const unsubAuth = subscribeToAuth(() => {
+    const unsubAuth = subscribeToAuth((session) => {
+      if (session && session.user) {
+        // When user logs in, reset active note to land on /notpad dashboard
+        setActiveNoteId(null);
+      }
       loadNotes();
     });
 

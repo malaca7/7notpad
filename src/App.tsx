@@ -260,6 +260,20 @@ export function MainLayout() {
     handleGoToDashboard();
   };
 
+  // Ao fazer login/cadastro, redirecionar imediatamente para a página de início logada: /notpad
+  const handleAuthSuccess = () => {
+    setActiveNoteId(null);
+    setPublicSlug(null);
+    try {
+      localStorage.removeItem('7notpad_active_note_id');
+      const baseUrl = (import.meta as any).env?.BASE_URL || '/';
+      const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
+      const targetUrl = `${cleanBase}/notpad`;
+      window.history.pushState({}, '', targetUrl);
+    } catch {}
+    loadNotes();
+  };
+
   // ========================================================
   // 1. SE NÃO TIVER LOGADO: QUALQUER URL/SUB-URL VAI PARA TELA DE INÍCIO!
   // ========================================================
@@ -283,9 +297,7 @@ export function MainLayout() {
           initialView={authModalView}
           initialEmail={authEmail}
           resetToken={resetTokenParam}
-          onSuccess={() => {
-            loadNotes();
-          }}
+          onSuccess={handleAuthSuccess}
           onOpenSettings={(tab) => {
             if (tab) setSettingsInitialTab(tab);
             setIsSettingsModalOpen(true);
@@ -316,9 +328,7 @@ export function MainLayout() {
           initialView={authModalView}
           initialEmail={authEmail}
           resetToken={resetTokenParam}
-          onSuccess={() => {
-            loadNotes();
-          }}
+          onSuccess={handleAuthSuccess}
           onOpenSettings={(tab) => {
             if (tab) setSettingsInitialTab(tab);
             setIsSettingsModalOpen(true);
