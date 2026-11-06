@@ -31,6 +31,7 @@ import { Modal } from '../common/Modal';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { useToast } from '../common/Toast';
 import { AdminService, type AdminStats } from '../../lib/adminService';
+import { getLocalNotes, saveLocalNotes } from '../../lib/storage';
 import { CloudShareService, type AnnouncementReadReceipt } from '../../lib/cloudShare';
 import { PlatformSettingsService, type PlatformLimits, type AnnouncementType, type AnnouncementAudience } from '../../lib/platformSettings';
 import type { UserProfile, UserRole } from '../../types/auth';
@@ -415,6 +416,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         setNewNoteEnableShare(false);
         setNewNoteShareSlug('');
         setNewNoteSharePassword('');
+        setNotes((prev) => [res.note!, ...prev]);
         loadAdminData();
         if (onNotesChanged) onNotesChanged();
       } else {
@@ -445,7 +447,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         remove_share_password: editNoteRemovePassword,
       });
 
-      if (res.success) {
+      if (res.success && res.note) {
+        success('Nota atualizada!', 'Alterações salvas e sincronizadas em toda a plataforma.');
+        const updated = res.note;
+        setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+        setEditingNote(null);
+        loadAdminData();
+        if (onNotesChanged) onNotesChanged();
+      } else if (res.success) {
         success('Nota atualizada!', 'Alterações salvas e sincronizadas em toda a plataforma.');
         setEditingNote(null);
         loadAdminData();
@@ -461,19 +470,32 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const handleTogglePinNote = async (note: Note) => {
+    const newPinned = !note.is_pinned;
+    setNotes((prev) => prev.map((n) => (n.id === note.id ? { ...n, is_pinned: newPinned } : n)));
     try {
-      const res = await AdminService.updateNote(note.id, { is_pinned: !note.is_pinned });
+      const res = await AdminService.updateNote(note.id, { is_pinned: newPinned });
       if (res.success) {
-        success(note.is_pinned ? 'Nota desafixada' : 'Nota fixada no topo!');
+        success(newPinned ? 'Nota fixada no topo!' : 'Nota desafixada');
         loadAdminData();
         if (onNotesChanged) onNotesChanged();
+      } else {
+        error('Erro ao alterar fixação', res.error);
+        loadAdminData();
       }
     } catch {
       error('Erro ao alterar fixação');
+      loadAdminData();
     }
   };
 
   const handleOpenNoteInEditor = (noteId: string) => {
+    const target = notes.find((n) => n.id === noteId);
+    if (target) {
+      const local = getLocalNotes();
+      if (!local.some((n) => n.id === noteId)) {
+        saveLocalNotes([target, ...local]);
+      }
+    }
     if (onSelectNote) {
       onSelectNote(noteId);
       onClose();
@@ -486,18 +508,22 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const handleDeleteNote = async () => {
     if (!noteToDelete) return;
+    const targetId = noteToDelete.id;
+    setNotes((prev) => prev.filter((n) => n.id !== targetId));
+    setNoteToDelete(null);
     try {
-      const res = await AdminService.deleteNote(noteToDelete.id);
+      const res = await AdminService.deleteNote(targetId);
       if (res.success) {
         success('Nota excluída!', 'O bloco de notas foi removido da plataforma.');
-        setNoteToDelete(null);
         loadAdminData();
         if (onNotesChanged) onNotesChanged();
       } else {
-        error('Erro ao excluir nota');
+        error('Erro ao excluir nota', res.error);
+        loadAdminData();
       }
     } catch {
       error('Erro ao excluir');
+      loadAdminData();
     }
   };
 
@@ -2160,11 +2186,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 onChange={(e) => setNewNoteOwner(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
               >
-                {users.map((u) => (
-                  <option key={u.id} value={u.username}>
-                    @{u.username} ({u.full_name}) {u.username.toLowerCase() === 'malaca' ? '⭐ Admin' : ''}
-                  </option>
-                ))}
+                <option value="malaca">@malaca (Malaca) ⭐ Root Admin</option>
+                {users
+                  .filter((u) => u.username && u.username.toLowerCase() !== 'malaca')
+                  .map((u) => (
+                    <option key={u.id} value={u.username}>
+                      @{u.username} ({u.full_name}) {u.role === 'admin' ? '🛡️ Admin' : ''}
+                    </option>
+                  ))}
               </select>
             </div>
 
@@ -2298,11 +2327,14 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 onChange={(e) => setEditNoteOwner(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-[#0d0d0d] border border-[#1c1c1c] text-xs text-gray-100 outline-none focus:border-brand-500"
               >
-                {users.map((u) => (
-                  <option key={u.id} value={u.username}>
-                    @{u.username} ({u.full_name})
-                  </option>
-                ))}
+                <option value="malaca">@malaca (Malaca) ⭐ Root Admin</option>
+                {users
+                  .filter((u) => u.username && u.username.toLowerCase() !== 'malaca')
+                  .map((u) => (
+                    <option key={u.id} value={u.username}>
+                      @{u.username} ({u.full_name}) {u.role === 'admin' ? '🛡️ Admin' : ''}
+                    </option>
+                  ))}
               </select>
             </div>
 

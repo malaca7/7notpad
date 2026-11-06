@@ -408,21 +408,8 @@ async function fetchCloudDocument(key: string): Promise<Record<string, any> | nu
 async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | null): Promise<boolean> {
   try {
     const now = new Date().toISOString();
-    const effectiveShare: NoteShare = {
-      ...(explicitShare ?? note.share ?? {
-        id: note.id,
-        note_id: note.id,
-        custom_slug: note.id,
-        is_password_protected: false,
-        is_active: true,
-        created_at: note.created_at,
-        updated_at: note.updated_at || now,
-        view_count: 0,
-      }),
-      owner_token: note.owner_token,
-      owner_user_id: note.user_id,
-      owner_username: note.owner_username,
-    };
+    const effectiveShare: NoteShare | null = (explicitShare !== undefined ? explicitShare : note.share) || null;
+    const isShareActive = Boolean(effectiveShare && effectiveShare.is_active);
 
     const payload = {
       sync_updated_at: now,
@@ -437,11 +424,12 @@ async function performSyncNoteToCloud(note: Note, explicitShare?: NoteShare | nu
         user_id: note.user_id,
         owner_username: note.owner_username,
         attachments: note.attachments || [],
+        share: effectiveShare,
       },
     };
 
     const extraKeys =
-      effectiveShare.custom_slug && effectiveShare.custom_slug !== note.id
+      isShareActive && effectiveShare?.custom_slug && effectiveShare.custom_slug !== note.id
         ? [effectiveShare.custom_slug]
         : [];
 
@@ -678,7 +666,10 @@ export const CloudShareService = {
     try {
       const doc = await fetchCloudDocument(GLOBAL_NOTES_CATALOG_KEY);
       if (doc && Array.isArray(doc.notes)) {
-        return doc.notes;
+        const deletedSet = new Set(Array.isArray(doc.deleted_ids) ? doc.deleted_ids : []);
+        return doc.notes.filter(
+          (n: Note) => n && n.id && !deletedSet.has(n.id) && (!n.local_id || !deletedSet.has(n.local_id))
+        );
       }
       return [];
     } catch {
@@ -696,9 +687,19 @@ export const CloudShareService = {
         return;
       }
 
-      const existing = await this.fetchAllNotesFromGlobalCatalog();
+      const doc = await fetchCloudDocument(GLOBAL_NOTES_CATALOG_KEY);
+      const existing: Note[] = Array.isArray(doc?.notes) ? doc.notes : [];
+      const existingDeleted: string[] = Array.isArray(doc?.deleted_ids) ? doc.deleted_ids : [];
+      const deletedSet = new Set(existingDeleted);
+
+      // If this note has been explicitly deleted, reject re-sync
+      if (deletedSet.has(note.id) || (note.local_id && deletedSet.has(note.local_id))) {
+        return;
+      }
+
       const now = new Date().toISOString();
-      const effectiveShare: NoteShare | undefined = explicitShare ?? note.share ?? undefined;
+      const effectiveShare: NoteShare | undefined =
+        explicitShare !== undefined ? (explicitShare || undefined) : (note.share || undefined);
 
       const cleanNote: Note = {
         ...note,
@@ -711,12 +712,14 @@ export const CloudShareService = {
           n.id !== note.id &&
           (note.local_id ? n.local_id !== note.local_id : true) &&
           n.local_id !== 'default_welcome_note' &&
-          !n.title?.includes('Bem-vindo')
+          !n.title?.includes('Bem-vindo') &&
+          !deletedSet.has(n.id)
       );
       filtered.unshift(cleanNote);
 
       await saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
         notes: filtered,
+        deleted_ids: existingDeleted,
         updated_at: now,
       });
 
@@ -737,11 +740,16 @@ export const CloudShareService = {
    */
   async deleteNoteFromGlobalCatalog(noteId: string): Promise<void> {
     try {
-      const existing = await this.fetchAllNotesFromGlobalCatalog();
+      const doc = await fetchCloudDocument(GLOBAL_NOTES_CATALOG_KEY);
+      const existing: Note[] = Array.isArray(doc?.notes) ? doc.notes : [];
+      const existingDeleted: string[] = Array.isArray(doc?.deleted_ids) ? doc.deleted_ids : [];
+
       const filtered = existing.filter((n) => n.id !== noteId && n.local_id !== noteId);
+      const updatedDeleted = Array.from(new Set([...existingDeleted, noteId])).slice(-300);
 
       await saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
         notes: filtered,
+        deleted_ids: updatedDeleted,
         updated_at: new Date().toISOString(),
       });
 

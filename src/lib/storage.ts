@@ -23,6 +23,27 @@ try {
 // Per-tab in-memory record of unlocked password hashes so other tabs/screens lock immediately when a password is set or changed
 const tabUnlockedHashes: Record<string, string> = {};
 
+const DELETED_NOTES_STORAGE_KEY = '7notpad_deleted_note_ids';
+
+export function getDeletedNoteIds(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_NOTES_STORAGE_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function markNoteAsDeletedLocally(noteId: string): void {
+  if (!noteId) return;
+  try {
+    const ids = getDeletedNoteIds();
+    ids.add(noteId);
+    const arr = Array.from(ids).slice(-500);
+    localStorage.setItem(DELETED_NOTES_STORAGE_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
 export function markNoteUnlockedInCurrentTab(noteId: string, passwordHash?: string): void {
   if (noteId && passwordHash) {
     tabUnlockedHashes[noteId] = passwordHash;
@@ -226,11 +247,13 @@ export const StorageService = {
     try {
       // 1. Fetch fresh notes from CloudShareService Global Catalog (cross-device/all users)
       const cloudNotes = await CloudShareService.fetchAllNotesFromGlobalCatalog();
+      const deletedIds = getDeletedNoteIds();
 
       let relevantRemoteNotes: Note[] = [];
       if (Array.isArray(cloudNotes) && cloudNotes.length > 0) {
         relevantRemoteNotes = cloudNotes.filter((n) => {
-          if (!n) return false;
+          if (!n || !n.id) return false;
+          if (deletedIds.has(n.id) || (n.local_id && deletedIds.has(n.local_id))) return false;
           if (n.local_id === 'default_welcome_note' || n.title?.includes('Bem-vindo ao 7NotPad')) return false;
           // Anonymous visitor
           if (!currentUserId && !currentUsername) {
@@ -253,15 +276,19 @@ export const StorageService = {
         });
       }
 
-      // Merge remote notes with fresh local notes (prefer newest updated_at)
+      // Merge remote notes with fresh local notes (prefer newest updated_at, skip deleted tombstones)
       const mergedMap = new Map<string, Note>();
       for (const n of freshLocalNotes) {
-        mergedMap.set(n.id, n);
+        if (!deletedIds.has(n.id) && (!n.local_id || !deletedIds.has(n.local_id))) {
+          mergedMap.set(n.id, n);
+        }
       }
       for (const n of relevantRemoteNotes) {
-        const local = mergedMap.get(n.id);
-        if (!local || new Date(n.updated_at).getTime() > new Date(local.updated_at).getTime()) {
-          mergedMap.set(n.id, n);
+        if (!deletedIds.has(n.id) && (!n.local_id || !deletedIds.has(n.local_id))) {
+          const local = mergedMap.get(n.id);
+          if (!local || new Date(n.updated_at).getTime() > new Date(local.updated_at).getTime()) {
+            mergedMap.set(n.id, n);
+          }
         }
       }
 
@@ -271,8 +298,11 @@ export const StorageService = {
 
       saveLocalNotes(mergedNotes);
 
-      // If local notes exist that aren't in cloud catalog yet, sync them non-blocking
+      // If local notes exist that aren't in cloud catalog yet, sync them non-blocking (never sync deleted notes!)
       for (const localNote of freshLocalNotes) {
+        if (deletedIds.has(localNote.id) || (localNote.local_id && deletedIds.has(localNote.local_id))) {
+          continue;
+        }
         if (!cloudNotes.some(cn => cn.id === localNote.id)) {
           CloudShareService.syncNoteToCloud(localNote).catch(() => {});
           CloudShareService.syncNoteToGlobalCatalog(localNote).catch(() => {});
@@ -424,7 +454,10 @@ export const StorageService = {
 
   // Delete note
   async deleteNote(noteId: string): Promise<boolean> {
-    // 1. Remove from local storage immediately
+    // 1. Mark as tombstone locally so background fetch never resurrects it
+    markNoteAsDeletedLocally(noteId);
+
+    // 2. Remove from local storage immediately
     const localNotes = getLocalNotes().filter(n => n.id !== noteId && n.local_id !== noteId);
     saveLocalNotes(localNotes);
 

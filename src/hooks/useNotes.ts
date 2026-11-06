@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Note, SaveStatus, NoteShare } from '../types/note';
-import { StorageService, getLocalNotes, saveLocalNotes, subscribeToRealtimeSync } from '../lib/storage';
+import { StorageService, getLocalNotes, saveLocalNotes, subscribeToRealtimeSync, markNoteAsDeletedLocally } from '../lib/storage';
 import { CloudShareService } from '../lib/cloudShare';
 import { getOrCreateOwnerToken } from '../lib/crypto';
 import { AuthService, subscribeToAuth } from '../lib/authService';
@@ -106,7 +106,16 @@ export function useNotes() {
 
     // 2. Global Real-time Pub/Sub across all browsers and devices via Ntfy SSE
     const unsubGlobal = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
-      if (event.type === 'note_updated' || event.type === 'note_deleted') {
+      if (event.type === 'note_deleted') {
+        const delId = event.noteId;
+        markNoteAsDeletedLocally(delId);
+        setNotes((prev) => prev.filter((n) => n.id !== delId && n.local_id !== delId));
+        setActiveNoteId((prevId) => (prevId === delId ? null : prevId));
+        const local = getLocalNotes().filter((n) => n.id !== delId && n.local_id !== delId);
+        saveLocalNotes(local);
+        return;
+      }
+      if (event.type === 'note_updated') {
         if (pendingNoteRef.current || saveTimeoutRef.current) return;
         loadNotes();
       }
