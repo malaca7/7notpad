@@ -41,7 +41,7 @@ export const GlobalAnnouncementBanner: React.FC<GlobalAnnouncementBannerProps> =
   const [isHovered, setIsHovered] = useState(false);
   const timerRef = useRef<any>(null);
 
-  // Listen for admin reset dismissal events in real time
+  // Listen for admin reset dismissal events and new announcements in real time
   useEffect(() => {
     const unsub = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
       if (event?.type === 'announcement_reset_dismissals') {
@@ -49,6 +49,9 @@ export const GlobalAnnouncementBanner: React.FC<GlobalAnnouncementBannerProps> =
         try {
           sessionStorage.removeItem(DISMISSED_STORAGE_KEY);
         } catch {}
+      }
+      if (event?.type === 'settings_updated' || event?.type === 'announcements_updated') {
+        setCurrentIndex(0);
       }
     });
     return unsub;

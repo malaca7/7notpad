@@ -359,10 +359,14 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
     // 2. Global Real-time Pub/Sub across all browsers and devices via Ntfy SSE
     const unsubGlobal = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
       if (
-        event.type === 'note_updated' &&
+        (event.type === 'note_updated' ||
+          event.type === 'note_deleted' ||
+          event.type === 'share_updated' ||
+          event.type === 'user_updated') &&
         (event.noteId === slug ||
           event.slug === slug ||
-          event.noteId === latestNoteIdRef.current)
+          event.noteId === latestNoteIdRef.current ||
+          !event.noteId)
       ) {
         if (Date.now() - lastLocalEditTimeRef.current < 1500) return;
         syncPublicNoteState(false);

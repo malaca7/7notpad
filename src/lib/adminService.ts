@@ -7,10 +7,10 @@ import {
   updateDoc 
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { type StoredUser, saveLocalSession } from './authService';
+import { type StoredUser, saveLocalSession, AuthService } from './authService';
 import { CloudShareService } from './cloudShare';
 import { generateSalt, hashPassword, getOrCreateOwnerToken } from './crypto';
-import { getLocalNotes, saveLocalNotes, getLocalShares, saveLocalShares, markNoteAsDeletedLocally } from './storage';
+import { getLocalNotes, saveLocalNotes, getLocalShares, saveLocalShares, markNoteAsDeletedLocally, notifyRealtimeSubscribers } from './storage';
 import { PlatformSettingsService, type PlatformLimits } from './platformSettings';
 import type { UserProfile, UserRole } from '../types/auth';
 import type { Note, NoteShare } from '../types/note';
@@ -395,22 +395,19 @@ export const AdminService = {
 
     // If current session user was modified, update local session and notify
     try {
-      const sessionRaw = localStorage.getItem('7notpad_session');
-      if (sessionRaw) {
-        const session = JSON.parse(sessionRaw);
-        if (session && session.user && user && (session.user.id === user.id || session.user.username?.toLowerCase() === user.username?.toLowerCase())) {
-          if (user.is_banned && user.username?.toLowerCase() !== 'malaca') {
-            localStorage.removeItem('7notpad_session');
-            window.dispatchEvent(
-              new CustomEvent('7notpad_user_banned', {
-                detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
-              })
-            );
-          } else {
-            session.user.role = user.role;
-            if (updates.full_name) session.user.full_name = user.full_name;
-            saveLocalSession(session);
-          }
+      const session = AuthService.getCurrentSession();
+      if (session && session.user && user && (session.user.id === user.id || session.user.username?.toLowerCase() === user.username?.toLowerCase())) {
+        if (user.is_banned && user.username?.toLowerCase() !== 'malaca') {
+          AuthService.logout();
+          window.dispatchEvent(
+            new CustomEvent('7notpad_user_banned', {
+              detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+            })
+          );
+        } else {
+          session.user.role = user.role;
+          if (updates.full_name) session.user.full_name = user.full_name;
+          saveLocalSession(session);
         }
       }
     } catch {}
@@ -502,18 +499,15 @@ export const AdminService = {
 
     // Check if current tab session belongs to this user
     try {
-      const sessionRaw = localStorage.getItem('7notpad_session');
-      if (sessionRaw) {
-        const session = JSON.parse(sessionRaw);
-        if (session && session.user && (session.user.id === user.id || session.user.username?.toLowerCase() === cleanUsername)) {
-          if (isBanned) {
-            localStorage.removeItem('7notpad_session');
-            window.dispatchEvent(
-              new CustomEvent('7notpad_user_banned', {
-                detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
-              })
-            );
-          }
+      const session = AuthService.getCurrentSession();
+      if (session && session.user && (session.user.id === user.id || session.user.username?.toLowerCase() === cleanUsername)) {
+        if (isBanned) {
+          AuthService.logout();
+          window.dispatchEvent(
+            new CustomEvent('7notpad_user_banned', {
+              detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+            })
+          );
         }
       }
     } catch {}
@@ -598,13 +592,10 @@ export const AdminService = {
 
     // Update current tab session if it matches
     try {
-      const sessionRaw = localStorage.getItem('7notpad_session');
-      if (sessionRaw) {
-        const session = JSON.parse(sessionRaw);
-        if (session && session.user && (session.user.id === user.id || session.user.username?.toLowerCase() === cleanUsername)) {
-          session.user.role = user.role;
-          saveLocalSession(session);
-        }
+      const session = AuthService.getCurrentSession();
+      if (session && session.user && (session.user.id === user.id || session.user.username?.toLowerCase() === cleanUsername)) {
+        session.user.role = user.role;
+        saveLocalSession(session);
       }
     } catch {}
 
@@ -803,6 +794,7 @@ export const AdminService = {
       owner_username: newNote.owner_username,
       user_id: newNote.user_id,
     });
+    notifyRealtimeSubscribers({ type: 'note_updated', noteId: newNote.id });
 
     // 3. Sync to cloud and global catalog in background concurrently
     Promise.all([
@@ -954,6 +946,7 @@ export const AdminService = {
       owner_username: updatedNote.owner_username,
       user_id: updatedNote.user_id,
     });
+    notifyRealtimeSubscribers({ type: 'note_updated', noteId: updatedNote.id });
 
     // 6. Sync to Global Cloud Catalog & Cloud storage concurrently in background
     Promise.all([
@@ -1002,6 +995,7 @@ export const AdminService = {
       type: 'note_deleted',
       noteId,
     });
+    notifyRealtimeSubscribers({ type: 'note_deleted', noteId });
 
     // 5. Delete from global cloud catalog in background
     CloudShareService.deleteNoteFromGlobalCatalog(noteId).catch((err) => {
@@ -1115,6 +1109,12 @@ export const AdminService = {
       }
     } catch {}
 
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'share_updated',
+      slug,
+    });
+    notifyRealtimeSubscribers({ type: 'share_updated', slug });
+
     return { success: true };
   },
 
@@ -1147,6 +1147,12 @@ export const AdminService = {
         await CloudShareService.syncNoteToCloud(updatedNote, null);
       }
     } catch {}
+
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'share_updated',
+      slug,
+    });
+    notifyRealtimeSubscribers({ type: 'share_updated', slug });
 
     return { success: true };
   },

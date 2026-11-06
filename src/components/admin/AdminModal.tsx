@@ -185,7 +185,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     // Auto-sync in real time whenever any user creates/edits notes, accounts or reads announcement
     const unsub = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
       // If a settings update arrives from another admin, only update if not actively on broadcast/limits tab
-      if (event?.type === 'settings_updated') {
+      if (event?.type === 'settings_updated' || event?.type === 'announcements_updated') {
         if (activeTab !== 'broadcast' && activeTab !== 'limits') {
           PlatformSettingsService.fetchLimits().then(fresh => {
             if (fresh) setLimits(fresh);
@@ -200,14 +200,27 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       }
     });
 
-    // Auto-refresh stats, users, notes, shares in the background (NEVER overwrite limits or form fields!)
+    // Auto-refresh stats, users, notes, shares in the background (every 3s)
     const pollInterval = setInterval(() => {
       loadAdminData(false);
-    }, 4000);
+      if (activeTab === 'broadcast') {
+        CloudShareService.fetchAnnouncementReads().then(setReadReceipts);
+      }
+    }, 3000);
+
+    const handleAdminWake = () => {
+      loadAdminData(false);
+      CloudShareService.fetchAnnouncementReads().then(setReadReceipts);
+    };
+    window.addEventListener('focus', handleAdminWake);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) handleAdminWake();
+    });
 
     return () => {
       unsub();
       clearInterval(pollInterval);
+      window.removeEventListener('focus', handleAdminWake);
     };
   }, [isOpen, activeTab]);
 

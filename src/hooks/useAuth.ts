@@ -28,18 +28,29 @@ export function useAuth() {
             (evt.userId && evt.userId === currentSession.user.id) ||
             (evt.username &&
               evt.username.toLowerCase() === currentSession.user.username?.toLowerCase().replace(/^@+/, ''));
-          if (matchUser && evt.is_banned && currentSession.user.username?.toLowerCase() !== 'malaca') {
-            AuthService.logout();
-            setSession(null);
-            window.dispatchEvent(
-              new CustomEvent('7notpad_user_banned', {
-                detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
-              })
-            );
-            return;
+          if (matchUser) {
+            if (evt.is_banned && currentSession.user.username?.toLowerCase() !== 'malaca') {
+              AuthService.logout();
+              setSession(null);
+              window.dispatchEvent(
+                new CustomEvent('7notpad_user_banned', {
+                  detail: { message: 'Sua conta de usuário foi suspensa pela administração.' },
+                })
+              );
+              return;
+            }
+            if (evt.role && evt.role !== currentSession.user.role) {
+              currentSession.user.role = evt.role;
+              setSession({ ...currentSession });
+            }
           }
         }
-        AuthService.syncCurrentUserRole();
+        AuthService.syncCurrentUserRole().then((profile) => {
+          if (profile) {
+            const fresh = AuthService.getCurrentSession();
+            if (fresh) setSession(fresh);
+          }
+        });
       }
     });
 
@@ -49,14 +60,23 @@ export function useAuth() {
     window.addEventListener('7notpad_user_banned', handleBannedEvent);
 
     const handleFocus = () => {
-      AuthService.syncCurrentUserRole();
+      AuthService.syncCurrentUserRole().then((profile) => {
+        if (profile) {
+          const fresh = AuthService.getCurrentSession();
+          if (fresh) setSession(fresh);
+        }
+      });
     };
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
 
+    // Periodic heartbeat to keep user role in sync in real time without refresh
+    const authHeartbeat = setInterval(handleFocus, 5000);
+
     return () => {
       unsubscribe();
       unsubGlobal();
+      clearInterval(authHeartbeat);
       window.removeEventListener('7notpad_user_banned', handleBannedEvent);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);

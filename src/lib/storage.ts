@@ -205,6 +205,9 @@ export function notifyRealtimeSubscribers(payload?: { type: string; noteId?: str
   try {
     broadcastChannel?.postMessage({ ...payload, timestamp: Date.now() });
   } catch {}
+  try {
+    window.dispatchEvent(new CustomEvent('7notpad_local_sync', { detail: payload }));
+  } catch {}
 }
 
 export function subscribeToRealtimeSync(callback: () => void): () => void {
@@ -219,6 +222,7 @@ export function subscribeToRealtimeSync(callback: () => void): () => void {
       callback();
     }
   };
+  const handleLocalSyncEvent = () => callback();
 
   let ch: BroadcastChannel | null = null;
   try {
@@ -229,6 +233,7 @@ export function subscribeToRealtimeSync(callback: () => void): () => void {
   } catch {}
 
   window.addEventListener('storage', handleStorageEvent);
+  window.addEventListener('7notpad_local_sync', handleLocalSyncEvent);
 
   return () => {
     try {
@@ -236,6 +241,7 @@ export function subscribeToRealtimeSync(callback: () => void): () => void {
       ch?.close();
     } catch {}
     window.removeEventListener('storage', handleStorageEvent);
+    window.removeEventListener('7notpad_local_sync', handleLocalSyncEvent);
   };
 }
 
@@ -640,6 +646,12 @@ export const StorageService = {
       note.share = null;
       saveLocalNotes(localNotes);
       CloudShareService.syncNoteToCloud(note, revokedShare).catch(() => {});
+      CloudShareService.publishGlobalRealtimeEvent({
+        type: 'share_updated',
+        noteId: note.id,
+        slug,
+      });
+      notifyRealtimeSubscribers({ type: 'share_updated', noteId: note.id, slug });
     }
 
     // Revoke from Firebase in background

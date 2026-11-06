@@ -115,16 +115,42 @@ export function useNotes() {
         saveLocalNotes(local);
         return;
       }
-      if (event.type === 'note_updated') {
+      if (
+        event.type === 'note_updated' ||
+        event.type === 'note_created' ||
+        event.type === 'notes_updated' ||
+        event.type === 'share_updated' ||
+        event.type === 'shares_updated' ||
+        event.type === 'catalog_updated' ||
+        event.type === 'user_updated'
+      ) {
         if (pendingNoteRef.current || saveTimeoutRef.current) return;
         loadNotes();
       }
     });
 
+    // 3. Periodic background catalog sync to auto-reconcile without refresh (every 3s)
+    const autoSyncInterval = setInterval(() => {
+      if (pendingNoteRef.current || saveTimeoutRef.current) return;
+      const freshLocal = getLocalNotes();
+      setNotes(freshLocal);
+    }, 3000);
+
+    // 4. Focus & visibility change auto-sync (switching tabs or unlocking phone/screen)
+    const handleVisibilitySync = () => {
+      if (pendingNoteRef.current || saveTimeoutRef.current) return;
+      loadNotes();
+    };
+    window.addEventListener('focus', handleVisibilitySync);
+    document.addEventListener('visibilitychange', handleVisibilitySync);
+
     return () => {
       unsubAuth();
       unsubRealtime();
       unsubGlobal();
+      clearInterval(autoSyncInterval);
+      window.removeEventListener('focus', handleVisibilitySync);
+      document.removeEventListener('visibilitychange', handleVisibilitySync);
     };
   }, [loadNotes]);
 

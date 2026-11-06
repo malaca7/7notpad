@@ -30,14 +30,106 @@ function getClientSessionId(): string {
 }
 
 let globalBroadcastChannel: BroadcastChannel | null = null;
+const globalRealtimeListeners = new Set<(event: any) => void>();
+let singletonEventSource: EventSource | null = null;
+let sseReconnectTimer: any = null;
+let sseBackoffMs = 1500;
+let isSseExplicitlyClosed = false;
+
+function dispatchToAllLocalListeners(event: any): void {
+  globalRealtimeListeners.forEach((listener) => {
+    try {
+      listener(event);
+    } catch (err) {
+      console.warn('Realtime listener error:', err);
+    }
+  });
+}
+
+function connectSingletonSse(): void {
+  if (isSseExplicitlyClosed || typeof EventSource === 'undefined') return;
+  if (globalRealtimeListeners.size === 0) return;
+  if (singletonEventSource && singletonEventSource.readyState === EventSource.OPEN) return;
+
+  try {
+    if (singletonEventSource) {
+      singletonEventSource.close();
+      singletonEventSource = null;
+    }
+
+    singletonEventSource = new EventSource(`${NTFY_BASE_URL}/${GLOBAL_REALTIME_TOPIC}/sse`);
+
+    singletonEventSource.onopen = () => {
+      sseBackoffMs = 1500;
+    };
+
+    singletonEventSource.onmessage = (event) => {
+      try {
+        if (!event.data) return;
+        const parsed = JSON.parse(event.data);
+        let messageData = parsed;
+        if (parsed.message && typeof parsed.message === 'string') {
+          try {
+            messageData = JSON.parse(parsed.message);
+          } catch {
+            messageData = parsed;
+          }
+        }
+        const myId = getClientSessionId();
+        if (messageData && messageData.clientId !== myId) {
+          dispatchToAllLocalListeners(messageData);
+        }
+      } catch (err) {
+        console.warn('SSE message parse warning:', err);
+      }
+    };
+
+    singletonEventSource.onerror = () => {
+      singletonEventSource?.close();
+      singletonEventSource = null;
+
+      if (!isSseExplicitlyClosed && globalRealtimeListeners.size > 0 && !sseReconnectTimer) {
+        sseReconnectTimer = setTimeout(() => {
+          sseReconnectTimer = null;
+          sseBackoffMs = Math.min(sseBackoffMs * 1.5, 12000);
+          connectSingletonSse();
+        }, sseBackoffMs);
+      }
+    };
+  } catch (err) {
+    console.warn('SSE connect warning:', err);
+  }
+}
+
+// When window regains focus or visibility, ensure SSE is alive and healthy
+if (typeof window !== 'undefined') {
+  const handleWake = () => {
+    if (globalRealtimeListeners.size > 0) {
+      if (!singletonEventSource || singletonEventSource.readyState === EventSource.CLOSED) {
+        connectSingletonSse();
+      }
+    }
+  };
+  window.addEventListener('focus', handleWake);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) handleWake();
+  });
+}
+
 try {
   if (typeof BroadcastChannel !== 'undefined') {
     globalBroadcastChannel = new BroadcastChannel(GLOBAL_CHANNEL_NAME);
+    globalBroadcastChannel.addEventListener('message', (evt: MessageEvent) => {
+      const myId = getClientSessionId();
+      if (evt.data && evt.data.clientId !== myId) {
+        dispatchToAllLocalListeners(evt.data);
+      }
+    });
   }
 } catch {}
 
 /**
- * Publish global real-time event to all screens/devices via Ntfy SSE + local BroadcastChannel
+ * Publish global real-time event to all screens/devices via Ntfy SSE + local BroadcastChannel + 0ms local listeners
  */
 export function publishGlobalRealtimeEvent(payload: Record<string, any>): void {
   const fullPayload = {
@@ -46,12 +138,15 @@ export function publishGlobalRealtimeEvent(payload: Record<string, any>): void {
     timestamp: Date.now(),
   };
 
-  // 1. Instant local inter-tab broadcast (0ms delay)
+  // 1. Instant dispatch to all components in the CURRENT tab (0ms delay)
+  dispatchToAllLocalListeners(fullPayload);
+
+  // 2. Instant local inter-tab broadcast via BroadcastChannel (0ms delay)
   try {
     globalBroadcastChannel?.postMessage(fullPayload);
   } catch {}
 
-  // 2. Cross-device and cross-network SSE pub/sub via Ntfy
+  // 3. Cross-device and cross-network SSE pub/sub via Ntfy
   try {
     fetch(`${NTFY_BASE_URL}/${GLOBAL_REALTIME_TOPIC}`, {
       method: 'POST',
@@ -65,78 +160,23 @@ export function publishGlobalRealtimeEvent(payload: Record<string, any>): void {
 }
 
 /**
- * Subscribe to global real-time events across all screens, tabs, and devices
+ * Subscribe to global real-time events across all screens, tabs, and devices (shared multiplexed connection)
  */
 export function subscribeToGlobalRealtimeEvents(listener: (event: any) => void): () => void {
-  const myId = getClientSessionId();
-
-  // Local BroadcastChannel listener
-  const handleBc = (evt: MessageEvent) => {
-    if (evt.data && evt.data.clientId !== myId) {
-      try {
-        listener(evt.data);
-      } catch (err) {
-        console.warn('Broadcast listener warning:', err);
-      }
-    }
-  };
-
-  try {
-    globalBroadcastChannel?.addEventListener('message', handleBc);
-  } catch {}
-
-  // Cross-device SSE listener with auto-reconnect
-  let es: EventSource | null = null;
-  let reconnectTimer: any = null;
-  let isClosed = false;
-
-  const connect = () => {
-    if (isClosed || typeof EventSource === 'undefined') return;
-    try {
-      es = new EventSource(`${NTFY_BASE_URL}/${GLOBAL_REALTIME_TOPIC}/sse`);
-
-      es.onmessage = (event) => {
-        try {
-          if (!event.data) return;
-          const parsed = JSON.parse(event.data);
-          let messageData = parsed;
-          if (parsed.message && typeof parsed.message === 'string') {
-            try {
-              messageData = JSON.parse(parsed.message);
-            } catch {
-              messageData = parsed;
-            }
-          }
-          if (messageData && messageData.clientId !== myId) {
-            listener(messageData);
-          }
-        } catch {}
-      };
-
-      es.onerror = () => {
-        es?.close();
-        es = null;
-        if (!isClosed && !reconnectTimer) {
-          reconnectTimer = setTimeout(() => {
-            reconnectTimer = null;
-            connect();
-          }, 3500);
-        }
-      };
-    } catch {}
-  };
-
-  connect();
+  globalRealtimeListeners.add(listener);
+  isSseExplicitlyClosed = false;
+  connectSingletonSse();
 
   return () => {
-    isClosed = true;
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    try {
-      globalBroadcastChannel?.removeEventListener('message', handleBc);
-    } catch {}
-    try {
-      es?.close();
-    } catch {}
+    globalRealtimeListeners.delete(listener);
+    if (globalRealtimeListeners.size === 0) {
+      if (sseReconnectTimer) {
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = null;
+      }
+      singletonEventSource?.close();
+      singletonEventSource = null;
+    }
   };
 }
 

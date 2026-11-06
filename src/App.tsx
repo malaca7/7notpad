@@ -61,7 +61,7 @@ export function MainLayout() {
     PlatformSettingsService.fetchLimits().then(setPlatformLimits);
     const unsubLocal = PlatformSettingsService.subscribe(setPlatformLimits);
     const unsubRemote = CloudShareService.subscribeToGlobalRealtimeEvents((event) => {
-      if (event.type === 'settings_updated') {
+      if (event.type === 'settings_updated' || event.type === 'announcements_updated') {
         if (event.settings && typeof event.settings === 'object') {
           PlatformSettingsService.saveLocally(event.settings);
           setPlatformLimits(event.settings);
@@ -71,13 +71,30 @@ export function MainLayout() {
       }
       if (event.type === 'announcement_reset_dismissals') {
         try {
+          sessionStorage.removeItem('7notpad_dismissed_announcements_v2');
           sessionStorage.removeItem('7notpad_dismissed_announcement_text');
         } catch {}
       }
     });
+
+    // Periodic heartbeat to auto-reconcile platform limits/announcements without F5 (every 4s)
+    const limitsHeartbeat = setInterval(() => {
+      PlatformSettingsService.fetchLimits().then(setPlatformLimits);
+    }, 4000);
+
+    const handleFocusSync = () => {
+      PlatformSettingsService.fetchLimits().then(setPlatformLimits);
+    };
+    window.addEventListener('focus', handleFocusSync);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) handleFocusSync();
+    });
+
     return () => {
       unsubLocal();
       unsubRemote();
+      clearInterval(limitsHeartbeat);
+      window.removeEventListener('focus', handleFocusSync);
     };
   }, []);
 
