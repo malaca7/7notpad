@@ -77,6 +77,11 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
   const [copied, setCopied] = useState(false);
   const [directAccessBadge, setDirectAccessBadge] = useState<string | null>(null);
 
+  // Advanced sharing access states: Private vs Expired
+  const [isPrivateRestricted, setIsPrivateRestricted] = useState(false);
+  const [isExpired, setIsExpired] = useState(false);
+  const [expirationDate, setExpirationDate] = useState<string | null>(null);
+
   // Refs to coordinate real-time polling with local collaborative editing
   const unlockedPasswordHashRef = useRef<string | null>(null);
   const unlockedPasswordInputRef = useRef<string>('');
@@ -242,8 +247,30 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
       setUpdatedAt(result.note?.updated_at || '');
       setAttachments((result.note as any)?.attachments || []);
 
-      // Creator/Admin of the note OR authorized @username member NEVER needs to enter a password!
+      // 1. Check if the shared link has an expiration date
+      if (result.share.expires_at) {
+        const expTime = new Date(result.share.expires_at).getTime();
+        if (!isNaN(expTime) && expTime < Date.now()) {
+          setIsExpired(true);
+          setExpirationDate(result.share.expires_at);
+          if (isInitial) setIsLoading(false);
+          return;
+        }
+      }
+      setIsExpired(false);
+      setExpirationDate(null);
+
+      // 2. Creator/Admin of the note OR authorized @username member NEVER needs to enter a password!
       const directAccess = hasDirectNoteAccess(result.note, result.share);
+
+      // 3. Check if note is Private (only accessible by creator & authorized @users)
+      if (result.share.access_type === 'private' && !directAccess.allowed) {
+        setIsPrivateRestricted(true);
+        if (isInitial) setIsLoading(false);
+        return;
+      }
+      setIsPrivateRestricted(false);
+
       if (directAccess.allowed) {
         const hasAdminEditRole = Boolean(directAccess.canEdit || directAccess.isCreator);
         setCanEdit(hasAdminEditRole);
@@ -267,8 +294,9 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
         setContent(fullContent);
         return;
       } else {
-        setCanEdit(false);
-        setDirectAccessBadge(null);
+        // If owner permitted collaborative editing for visitors with link
+        setCanEdit(Boolean(result.share.allow_editing));
+        setDirectAccessBadge(result.share.allow_editing ? 'Editor Convidado' : null);
       }
 
       if (result.share.is_password_protected) {
@@ -506,6 +534,105 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
     );
   }
 
+  if (isExpired) {
+    const formattedExp = expirationDate ? new Date(expirationDate).toLocaleString('pt-BR') : '';
+
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center bg-black text-gray-100 p-4">
+        <div className="max-w-md w-full text-center space-y-5 p-6 sm:p-8 rounded-3xl bg-[#050505] border border-[#1c1c1c] shadow-2xl">
+          <div className="w-16 h-16 mx-auto rounded-3xl bg-amber-500/10 text-amber-400 flex items-center justify-center border border-amber-500/20">
+            <Clock className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-100">
+              Link de Compartilhamento Expirado
+            </h1>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              O link temporário para este bloco de notas expirou em <span className="text-amber-400 font-mono font-semibold">{formattedExp || 'data recente'}</span>.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-amber-500/5 border border-amber-500/20 text-left text-xs text-gray-300 space-y-2">
+            <div className="font-semibold text-amber-400 flex items-center gap-1.5">
+              <Info className="w-4 h-4 shrink-0" />
+              <span>O que fazer?</span>
+            </div>
+            <p className="leading-relaxed opacity-90">
+              O autor configurou este link com prazo determinado de acesso. Caso precise visualizá-lo novamente, solicite um novo link de compartilhamento ao autor da nota.
+            </p>
+          </div>
+
+          <div className="pt-1">
+            <button
+              onClick={onGoHome}
+              className="w-full inline-flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-brand-600/20"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Acessar 7NotPad
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isPrivateRestricted) {
+    return (
+      <div className="min-h-[100dvh] flex items-center justify-center bg-black text-gray-100 p-4">
+        <div className="max-w-md w-full text-center space-y-5 p-6 sm:p-8 rounded-3xl bg-[#050505] border border-[#1c1c1c] shadow-2xl">
+          <div className="w-16 h-16 mx-auto rounded-3xl bg-purple-500/10 text-purple-400 flex items-center justify-center border border-purple-500/20">
+            <Lock className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-100">
+              Acesso Restrito: Bloco de Notas Privado
+            </h1>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              O proprietário configurou este bloco de notas como <span className="text-purple-400 font-semibold">Privado</span>. O acesso é restrito exclusivamente ao autor e usuários autorizados da plataforma.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-purple-500/5 border border-purple-500/20 text-left text-xs text-gray-300 space-y-2">
+            <div className="font-semibold text-purple-400 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 shrink-0" />
+              <span>Como obter acesso?</span>
+            </div>
+            {currentUser ? (
+              <p className="leading-relaxed opacity-90">
+                Você está conectado como <strong className="text-purple-300 font-mono">@{currentUser.username}</strong>, mas esta conta não foi incluída na lista de usuários autorizados desta nota.
+              </p>
+            ) : (
+              <p className="leading-relaxed opacity-90">
+                Se você possui uma conta de usuário cadastrada no 7NotPad que foi autorizada pelo proprietário, faça login para desbloquear o acesso imediato.
+              </p>
+            )}
+          </div>
+
+          <div className="pt-1 flex flex-col gap-2">
+            {!currentUser && onOpenAuthModal && (
+              <button
+                onClick={onOpenAuthModal}
+                className="w-full inline-flex items-center justify-center gap-2 py-3 px-5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-sm font-semibold transition-colors shadow-lg shadow-purple-600/20"
+              >
+                <LogIn className="w-4 h-4" />
+                Fazer Login com Usuário Autorizado
+              </button>
+            )}
+            <button
+              onClick={onGoHome}
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-5 rounded-xl bg-[#0f0f0f] hover:bg-[#171717] text-gray-200 text-xs font-semibold transition-colors border border-[#1c1c1c]"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Voltar ao Início
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[100dvh] bg-black text-gray-100 flex flex-col">
       {/* Top Header */}
@@ -593,10 +720,11 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
               {theme === 'dark' ? <Moon className="w-4 h-4 text-brand-400" /> : <Sun className="w-4 h-4 text-amber-400" />}
             </button>
 
-            {!isLocked && (
+            {!isLocked && share?.allow_copy !== false && (
               <button
                 onClick={handleCopyContent}
                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-[#0a0a0a] hover:bg-[#141414] border border-[#1c1c1c] text-xs font-medium text-gray-200 transition-colors"
+                title="Copiar texto da nota"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 <span className="hidden xs:inline">{copied ? 'Copiado!' : 'Copiar'}</span>
@@ -757,6 +885,11 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
                     <div className="flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5" />
                       <span>Atualizada às {new Date(updatedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
+                  )}
+                  {!share?.hide_author && share?.owner_username && (
+                    <div className="flex items-center gap-1.5 text-brand-400 font-mono">
+                      <span>Autor: @{share.owner_username}</span>
                     </div>
                   )}
                   <div className="sm:ml-auto text-[11px] text-brand-400 font-mono truncate max-w-full">

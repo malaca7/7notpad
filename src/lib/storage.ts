@@ -504,9 +504,7 @@ export const StorageService = {
       note.share = share;
       saveLocalNotes(localNotes);
 
-      // 2. Sync to CloudShareService & Global Catalog so /notpad/<ID> works across browsers without #data=
-      await CloudShareService.syncNoteToCloud(note, share);
-      await CloudShareService.syncNoteToGlobalCatalog(note, share);
+      // 2. Broadcast real-time update immediately (0ms delay)
       CloudShareService.publishGlobalRealtimeEvent({
         type: 'note_updated',
         noteId: note.id,
@@ -514,10 +512,15 @@ export const StorageService = {
         title: note.title,
       });
 
-      const res = await FirebaseService.saveShare(share, note);
-      if (!res.success && res.error?.includes('já está em uso')) {
-        return res;
-      }
+      // 3. Sync to CloudShareService & Global Catalog non-blocking in background
+      Promise.all([
+        CloudShareService.syncNoteToCloud(note, share),
+        CloudShareService.syncNoteToGlobalCatalog(note, share),
+      ]).catch((err) => {
+        console.warn('saveShare cloud sync error:', err);
+      });
+
+      FirebaseService.saveShare(share, note).catch(() => {});
       FirebaseService.saveNote(note).catch(() => {});
     }
 

@@ -16,6 +16,8 @@ export interface SharedUserAccess {
   added_at: string;
 }
 
+export type ShareAccessType = 'public' | 'private';
+
 export interface NoteShare {
   id: string;
   note_id: string;
@@ -31,6 +33,11 @@ export interface NoteShare {
   owner_user_id?: string;
   owner_username?: string;
   allowed_users?: SharedUserAccess[];
+  access_type?: ShareAccessType; // 'public' | 'private'
+  allow_editing?: boolean; // true = collaborative edit by visitors, false = read-only
+  allow_copy?: boolean; // true = visitors can copy/duplicate content
+  hide_author?: boolean; // true = hide creator username/info on public page
+  expires_at?: string | null; // ISO date string of expiration or null
 }
 
 export interface Note {

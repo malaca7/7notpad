@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
-import type { Note, NoteShare, SharedUserAccess } from '../../types/note';
+import type { Note, NoteShare, SharedUserAccess, ShareAccessType } from '../../types/note';
 import { StorageService, markNoteUnlockedInCurrentTab } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
 import { generateSalt, hashPassword, slugify } from '../../lib/crypto';
@@ -9,6 +9,7 @@ import confetti from 'canvas-confetti';
 import { 
   Share2, 
   Lock, 
+  Unlock,
   Copy, 
   Check, 
   ExternalLink, 
@@ -23,7 +24,13 @@ import {
   UserPlus,
   Users,
   X,
-  ShieldCheck
+  Globe,
+  Clock,
+  QrCode,
+  Download,
+  MessageCircle,
+  Send,
+  Edit3
 } from 'lucide-react';
 
 interface ShareModalProps {
@@ -41,19 +48,47 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 }) => {
   const { success, error } = useToast();
 
-  // Always default to true when sharing a note so the user doesn't copy an inactive link!
+  // Core share activation and link slug
   const [isActive, setIsActive] = useState<boolean>(note.share ? note.share.is_active : true);
   const [slug, setSlug] = useState<string>(note.share?.custom_slug || note.id);
+  const [isSlugConflict, setIsSlugConflict] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // 1. Public vs Private Access Mode
+  const [accessType, setAccessType] = useState<ShareAccessType>(
+    note.share?.access_type || 'public'
+  );
+
+  // 2. Password Protection (Activate / Deactivate Password)
   const [isPasswordProtected, setIsPasswordProtected] = useState<boolean>(
     note.share?.is_password_protected ?? false
   );
   const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [copied, setCopied] = useState<boolean>(false);
-  const [isSlugConflict, setIsSlugConflict] = useState<boolean>(false);
-  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const hasExistingPassword = Boolean(note.share?.password_hash);
 
-  // Platform users (@malaca, etc.) selection state
+  // 3. Collaborative Editing vs Read-Only
+  const [allowEditing, setAllowEditing] = useState<boolean>(
+    Boolean(note.share?.allow_editing)
+  );
+
+  // 4. Content Copying Permission
+  const [allowCopy, setAllowCopy] = useState<boolean>(
+    note.share?.allow_copy !== false
+  );
+
+  // 5. Hide Author / Anonymous Sharing
+  const [hideAuthor, setHideAuthor] = useState<boolean>(
+    Boolean(note.share?.hide_author)
+  );
+
+  // 6. Expiration Option
+  const [expirationOption, setExpirationOption] = useState<'never' | '1h' | '24h' | '7d' | '30d'>('never');
+  const [expiresAt, setExpiresAt] = useState<string | null>(
+    note.share?.expires_at || null
+  );
+
+  // 7. Platform users (@malaca, etc.) access management
   const [allowedUsers, setAllowedUsers] = useState<SharedUserAccess[]>(
     note.share?.allowed_users || []
   );
@@ -63,7 +98,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [userSearchInput, setUserSearchInput] = useState<string>('');
   const [newUserRole, setNewUserRole] = useState<'admin' | 'viewer'>('admin');
 
-  // Sync state when modal opens or active note ID changes
+  // UI helpers
+  const [copied, setCopied] = useState<boolean>(false);
+  const [showQrCodeModal, setShowQrCodeModal] = useState<boolean>(false);
+
+  // Sync state when modal opens or note changes
   useEffect(() => {
     if (isOpen) {
       setPlatformUsers(AuthService.getPlatformUsers());
@@ -79,45 +118,65 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             ? note.share.custom_slug
             : note.id;
         setSlug(initialSlug);
+        setAccessType(note.share.access_type || 'public');
         setIsPasswordProtected(note.share.is_password_protected);
+        setAllowEditing(Boolean(note.share.allow_editing));
+        setAllowCopy(note.share.allow_copy !== false);
+        setHideAuthor(Boolean(note.share.hide_author));
+        setExpiresAt(note.share.expires_at || null);
+        setExpirationOption(note.share.expires_at ? '24h' : 'never');
         setAllowedUsers(note.share.allowed_users || []);
         setPassword('');
       } else {
-        // Default to active and use the unique ID of the note!
+        // Default new share
         setIsActive(true);
         setSlug(note.id);
+        setAccessType('public');
         setIsPasswordProtected(false);
+        setAllowEditing(false);
+        setAllowCopy(true);
+        setHideAuthor(false);
+        setExpiresAt(null);
+        setExpirationOption('never');
         setAllowedUsers([]);
         setPassword('');
       }
+
       setUserSearchInput('');
       setIsSlugConflict(false);
       setCopied(false);
+      setShowQrCodeModal(false);
     }
   }, [isOpen, note.id]);
 
-  // Keep share state synced if updated from another screen/tab while modal is open
+  // Keep share state synced if updated remotely while modal is open
   useEffect(() => {
     if (!isOpen || !note.share || isSaving) return;
     setIsActive(note.share.is_active);
+    if (note.share.access_type) setAccessType(note.share.access_type);
     setIsPasswordProtected(note.share.is_password_protected);
-    if (note.share.custom_slug) {
-      setSlug(note.share.custom_slug);
-    }
-    if (Array.isArray(note.share.allowed_users)) {
-      setAllowedUsers(note.share.allowed_users);
-    }
+    if (note.share.allow_editing !== undefined) setAllowEditing(note.share.allow_editing);
+    if (note.share.allow_copy !== undefined) setAllowCopy(note.share.allow_copy);
+    if (note.share.hide_author !== undefined) setHideAuthor(note.share.hide_author);
+    if (note.share.custom_slug) setSlug(note.share.custom_slug);
+    if (Array.isArray(note.share.allowed_users)) setAllowedUsers(note.share.allowed_users);
+    if (note.share.expires_at !== undefined) setExpiresAt(note.share.expires_at);
   }, [
     isOpen,
     isSaving,
     note.share?.updated_at,
     note.share?.is_active,
+    note.share?.access_type,
     note.share?.is_password_protected,
+    note.share?.allow_editing,
+    note.share?.allow_copy,
+    note.share?.hide_author,
     note.share?.custom_slug,
     note.share?.allowed_users,
+    note.share?.expires_at,
   ]);
 
-  // Check slug availability when slug changes
+  // Check slug availability in background
   useEffect(() => {
     const cleanSlug = slugify(slug);
     if (!cleanSlug) {
@@ -186,7 +245,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     await executeSave(false, nextUsers);
   };
 
-  // Filtered platform user suggestions
   const filteredSuggestions = platformUsers.filter((u) => {
     const alreadyAdded = allowedUsers.some(
       (added) => added.username.toLowerCase() === u.username.toLowerCase()
@@ -213,7 +271,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   // Helper to save share state to storage/Firebase
-  const executeSave = async (forceActive = false, customAllowedUsers?: SharedUserAccess[]): Promise<{ success: boolean; error?: string; cloudSynced?: boolean }> => {
+  const executeSave = async (
+    forceActive = false, 
+    customAllowedUsers?: SharedUserAccess[],
+    overridePasswordProtected?: boolean
+  ): Promise<{ success: boolean; error?: string; cloudSynced?: boolean }> => {
     const cleanSlug = slugify(slug);
     if (!cleanSlug || cleanSlug.length < 3) {
       return { success: false, error: 'O identificador precisa conter pelo menos 3 caracteres.' };
@@ -223,7 +285,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       return { success: false, error: 'Este link já está em uso por outra nota. Escolha outro.' };
     }
 
-    if (isPasswordProtected) {
+    const effectivePasswordProtected = overridePasswordProtected !== undefined
+      ? overridePasswordProtected
+      : isPasswordProtected;
+
+    if (effectivePasswordProtected) {
       if (!note.share?.password_hash && !password.trim()) {
         return { success: false, error: 'Você ativou a proteção por senha, informe uma senha de no mínimo 3 dígitos.' };
       }
@@ -235,7 +301,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     let salt = note.share?.password_salt;
     let hash = note.share?.password_hash;
 
-    if (isPasswordProtected) {
+    if (effectivePasswordProtected) {
       if (password.trim()) {
         salt = generateSalt();
         hash = await hashPassword(password.trim(), salt);
@@ -248,6 +314,20 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       hash = undefined;
     }
 
+    // Compute expiration date
+    let computedExpiresAt = expiresAt;
+    if (expirationOption === 'never') {
+      computedExpiresAt = null;
+    } else if (expirationOption === '1h') {
+      computedExpiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    } else if (expirationOption === '24h') {
+      computedExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    } else if (expirationOption === '7d') {
+      computedExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    } else if (expirationOption === '30d') {
+      computedExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    }
+
     const activeState = forceActive ? true : isActive;
     const currentUser = AuthService.getCurrentUser();
 
@@ -255,7 +335,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       id: note.share?.id || crypto.randomUUID(),
       note_id: note.id,
       custom_slug: cleanSlug,
-      is_password_protected: isPasswordProtected,
+      is_password_protected: effectivePasswordProtected,
       password_salt: salt,
       password_hash: hash,
       is_active: activeState,
@@ -266,6 +346,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       owner_user_id: note.user_id || currentUser?.id,
       owner_username: note.owner_username || currentUser?.username,
       allowed_users: customAllowedUsers ?? allowedUsers,
+      access_type: accessType,
+      allow_editing: allowEditing,
+      allow_copy: allowCopy,
+      hide_author: hideAuthor,
+      expires_at: computedExpiresAt,
     };
 
     setIsActive(activeState);
@@ -275,7 +360,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       onShareUpdated(shareData);
       return { success: true, cloudSynced: true };
     } else {
-      // Still saved locally!
       onShareUpdated(shareData);
       return { success: true, cloudSynced: false, error: result.error };
     }
@@ -284,7 +368,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const handleCopyLink = async () => {
     setIsSaving(true);
     try {
-      // 1. Automatically activate and save the share!
       const res = await executeSave(true);
       if (!res.success) {
         error('Falha ao compartilhar', res.error || 'Erro ao validar compartilhamento.');
@@ -302,7 +385,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
       const cleanSlug = slugify(slug) || note.id;
       success('Link copiado!', `URL /notpad/${cleanSlug} copiada para a área de transferência.`);
-
       setTimeout(() => setCopied(false), 2500);
     } catch {
       error('Erro ao copiar link', 'Não foi possível copiar automaticamente.');
@@ -325,6 +407,52 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     }
   };
 
+  const handleShareWhatsApp = async () => {
+    await executeSave(true);
+    const text = `${note.title ? `*${note.title}*\n` : ''}Confira esta nota no 7NotPad:\n${getShareUrl()}`;
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareTelegram = async () => {
+    await executeSave(true);
+    const text = note.title ? `${note.title} - 7NotPad` : '7NotPad';
+    window.open(`https://t.me/share/url?url=${encodeURIComponent(getShareUrl())}&text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleDownloadQr = async () => {
+    try {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(getShareUrl())}`;
+      const res = await fetch(qrUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `qrcode-7notpad-${slugify(slug) || note.id}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      success('QR Code baixado com sucesso!');
+    } catch {
+      error('Erro ao baixar QR Code.');
+    }
+  };
+
+  // Instant password deactivation
+  const handleDeactivatePassword = async () => {
+    setIsPasswordProtected(false);
+    setPassword('');
+    setIsSaving(true);
+    try {
+      await executeSave(false, undefined, false);
+      success('Senha Desativada!', 'O bloco de notas agora está acessível livremente sem senha.');
+    } catch {
+      error('Erro ao desativar senha.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const handleSaveShare = async () => {
     setIsSaving(true);
     try {
@@ -336,8 +464,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
       const cleanSlug = slugify(slug);
       success(
-        isActive ? 'Compartilhamento atualizado!' : 'Compartilhamento desativado',
-        `Sincronizado em tempo real para /notpad/${cleanSlug}`
+        isActive ? 'Compartilhamento salvo!' : 'Compartilhamento desativado',
+        `Configurações atualizadas para /notpad/${cleanSlug}`
       );
     } catch (err: any) {
       error('Erro ao salvar', err?.message || 'Erro ao salvar compartilhamento.');
@@ -360,356 +488,657 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title={
-        <div className="flex items-center gap-2">
-          <div className="p-2 rounded-xl bg-brand-500/10 text-brand-400">
-            <Share2 className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Compartilhar Nota</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400 font-normal">
-              Gerencie o link único, usuários autorizados (@username) e senha
-            </p>
-          </div>
-        </div>
-      }
-      maxWidth="lg"
-    >
-      <div className="space-y-5">
-        {/* Active Toggle Switch */}
-        <div className="flex items-center justify-between p-4 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838]">
-          <div>
-            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <span>Permitir acesso público por link</span>
-              {isActive && (
-                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Ativo
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              Sincroniza alterações automaticamente em todas as telas abertas
-            </div>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={isActive}
-              onChange={(e) => setIsActive(e.target.checked)}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600"></div>
-          </label>
-        </div>
-
-        {/* Custom Slug Config */}
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
-            ID Único do Bloco de Nota (/notpad/:id)
-          </label>
+    <>
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title={
           <div className="flex items-center gap-2">
-            <div className="flex-1 flex items-center bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2.5 focus-within:ring-2 focus-within:ring-brand-500/50">
-              <span className="text-xs text-gray-400 select-none pr-1 truncate max-w-[170px] sm:max-w-none font-mono">
-                {window.location.host}{((import.meta as any).env?.BASE_URL || '/').replace(/\/+$/, '')}/notpad/
-              </span>
-              <input
-                type="text"
-                value={slug}
-                onChange={handleSlugChange}
-                placeholder={note.id}
-                className="flex-1 bg-transparent text-sm text-gray-900 dark:text-gray-100 outline-none font-mono"
-              />
+            <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+              <Share2 className="w-5 h-5" />
             </div>
-            <button
-              type="button"
-              onClick={handleUseNoteUniqueId}
-              title="Restaurar ID único original da nota"
-              className="p-2.5 rounded-xl border border-gray-200 dark:border-[#232838] bg-gray-50 dark:bg-[#181b24] hover:bg-gray-100 dark:hover:bg-[#202430] text-gray-600 dark:text-gray-300 transition-colors"
-            >
-              <Sparkles className="w-4 h-4 text-brand-400" />
-            </button>
+            <div>
+              <h2 className="text-base font-bold text-gray-100">Compartilhar Nota</h2>
+              <p className="text-xs text-gray-400 font-normal">
+                Visibilidade público/privado, senha, permissões de edição e opções avançadas
+              </p>
+            </div>
           </div>
-
-          {isSlugConflict && (
-            <div className="flex items-center gap-1.5 mt-2 text-xs text-rose-500">
-              <AlertCircle className="w-3.5 h-3.5" />
-              <span>Este identificador já está em uso. Por favor, escolha outro.</span>
-            </div>
-          )}
-        </div>
-
-        {/* Share with Platform Users (@malaca, etc.) */}
-        <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-brand-400" />
-              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                Compartilhar com Usuários da Plataforma
-              </span>
-            </div>
-            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20">
-              Acesso sem senha
-            </span>
-          </div>
-
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Selecione usuários cadastrados (como <strong className="text-brand-400">@malaca</strong>) para liberar acesso direto ao bloco de notas sem solicitar senha.
-          </p>
-
-          {/* Search / Add @username Input */}
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <AtSign className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={userSearchInput}
-                onChange={(e) => setUserSearchInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddPlatformUser();
-                  }
-                }}
-                placeholder="Buscar ou digitar usuario (ex: @malaca)..."
-                className="w-full bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50"
-              />
-            </div>
-
-            <select
-              value={newUserRole}
-              onChange={(e) => setNewUserRole(e.target.value as 'admin' | 'viewer')}
-              className="bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl px-2.5 py-2 text-xs text-gray-700 dark:text-gray-200 outline-none focus:ring-2 focus:ring-brand-500/50"
-            >
-              <option value="admin">Admin / Editor (Pode Editar)</option>
-              <option value="viewer">Leitor Direto (Sem Senha)</option>
-            </select>
-
-            <button
-              type="button"
-              onClick={() => handleAddPlatformUser()}
-              className="flex items-center gap-1 px-3 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition-colors shrink-0"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>Adicionar</span>
-            </button>
-          </div>
-
-          {/* Available Platform Users Quick-Select Pills */}
-          {filteredSuggestions.length > 0 && (
-            <div className="space-y-1.5 pt-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 block">
-                Usuários disponíveis na plataforma (clique para selecionar):
-              </span>
-              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                {filteredSuggestions.map((u) => (
-                  <button
-                    key={u.username}
-                    type="button"
-                    onClick={() => handleAddPlatformUser(u.username, u.full_name)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#11131a] hover:bg-brand-500/10 border border-gray-200 dark:border-[#232838] hover:border-brand-500/40 text-xs text-gray-700 dark:text-gray-200 transition-all group"
-                  >
-                    <span className="w-4 h-4 rounded-full bg-brand-500/20 text-brand-400 font-bold text-[10px] flex items-center justify-center uppercase">
-                      {(u.full_name || u.username)[0]}
+        }
+        maxWidth="lg"
+      >
+        <div className="space-y-4 max-h-[78vh] overflow-y-auto pr-1">
+          {/* Active Switch Bar */}
+          <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c]">
+            <div className="space-y-0.5">
+              <div className="text-xs font-semibold text-gray-200 flex items-center gap-2">
+                <span>Disponibilizar Link na Web</span>
+                {isActive ? (
+                  <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
                     </span>
-                    <span className="font-mono font-semibold text-brand-400">@{u.username}</span>
-                    {u.full_name && u.full_name.toLowerCase() !== u.username.toLowerCase() && (
-                      <span className="text-[11px] text-gray-400">({u.full_name})</span>
-                    )}
-                    <span className="text-[10px] text-emerald-400 font-bold ml-0.5">+</span>
-                  </button>
-                ))}
+                    Link Ativo no Ar
+                  </span>
+                ) : (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
+                    Desativado
+                  </span>
+                )}
               </div>
-            </div>
-          )}
-
-          {/* Selected Allowed Users List */}
-          {allowedUsers.length > 0 && (
-            <div className="space-y-1.5 pt-2 border-t border-gray-200/70 dark:border-[#232838]">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Usuários com acesso liberado ({allowedUsers.length}):
-              </span>
-              <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                {allowedUsers.map((u) => (
-                  <div
-                    key={u.username}
-                    className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838]"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="w-6 h-6 rounded-full bg-brand-500/20 text-brand-400 font-bold text-xs flex items-center justify-center uppercase shrink-0">
-                        {(u.full_name || u.username)[0]}
-                      </div>
-                      <div className="truncate">
-                        <span className="text-xs font-mono font-bold text-brand-400">
-                          @{u.username}
-                        </span>
-                        {u.full_name && (
-                          <span className="text-[11px] text-gray-500 dark:text-gray-400 ml-1.5">
-                            {u.full_name}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleUserRole(u.username)}
-                        title="Clique para alternar permissão"
-                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-colors ${
-                          u.role === 'admin'
-                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
-                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                        }`}
-                      >
-                        {u.role === 'admin' ? 'Admin / Editor (Pode Editar)' : 'Leitor / Sem Senha'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRemovePlatformUser(u.username)}
-                        className="p-1 text-gray-400 hover:text-rose-500 rounded-lg transition-colors"
-                        title="Remover usuário"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Password Protection */}
-        <div className="p-4 rounded-xl bg-gray-50 dark:bg-[#181b24] border border-gray-200 dark:border-[#232838] space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-brand-400" />
-              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                Proteger com Senha (para visitantes externos)
-              </span>
+              <p className="text-[11px] text-gray-400">
+                Sincroniza alterações em tempo real nas telas de todos os leitores e colaboradores.
+              </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
-                checked={isPasswordProtected}
-                onChange={(e) => setIsPasswordProtected(e.target.checked)}
+                checked={isActive}
+                onChange={(e) => setIsActive(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-600"></div>
+              <div className="w-11 h-6 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600"></div>
             </label>
           </div>
 
-          {isPasswordProtected && (
-            <div className="pt-2">
-              <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                {note.share?.password_hash
-                  ? 'Nova senha (mínimo 3 dígitos — deixe vazio para manter a atual):'
-                  : 'Digite uma senha para leitura (mínimo 3 dígitos):'}
+          {/* 1. MODO DE VISIBILIDADE: PÚBLICO VS PRIVADO */}
+          <div className="p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Modo de Visibilidade (Público / Privado)</span>
               </label>
-              <div className="relative">
+              <span className="text-[10px] text-gray-400 font-mono">
+                {accessType === 'public' ? 'Geral' : 'Restrito'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Option: Público */}
+              <button
+                type="button"
+                onClick={() => setAccessType('public')}
+                className={`p-3 rounded-xl border text-left transition-all ${
+                  accessType === 'public'
+                    ? 'border-cyan-500/60 bg-cyan-950/20 text-cyan-100 shadow-sm shadow-cyan-950/30'
+                    : 'border-[#1c1c1c] bg-[#0c0c0c] text-gray-400 hover:border-gray-700 hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 font-bold text-xs text-gray-100">
+                    <Globe className="w-4 h-4 text-cyan-400" />
+                    <span>Público</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
+                    accessType === 'public' ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' : 'bg-gray-800 text-gray-500 border-gray-700'
+                  }`}>
+                    Qualquer Link
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  Qualquer pessoa que receber o link pode acessar. Você pode definir uma senha opcional para proteção extra.
+                </p>
+              </button>
+
+              {/* Option: Privado */}
+              <button
+                type="button"
+                onClick={() => setAccessType('private')}
+                className={`p-3 rounded-xl border text-left transition-all ${
+                  accessType === 'private'
+                    ? 'border-purple-500/60 bg-purple-950/20 text-purple-100 shadow-sm shadow-purple-950/30'
+                    : 'border-[#1c1c1c] bg-[#0c0c0c] text-gray-400 hover:border-gray-700 hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2 font-bold text-xs text-gray-100">
+                    <Lock className="w-4 h-4 text-purple-400" />
+                    <span>Privado</span>
+                  </div>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
+                    accessType === 'private' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-gray-800 text-gray-500 border-gray-700'
+                  }`}>
+                    Apenas Autorizados
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 leading-relaxed">
+                  Apenas você e os usuários cadastrados da plataforma selecionados abaixo (@usuario) têm permissão para acessar.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* 2. PROTEÇÃO POR SENHA (ATIVAR / DESATIVAR SENHA) */}
+          <div className="p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className={`p-1 rounded-lg border ${
+                  isPasswordProtected
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                    : 'bg-gray-800 text-gray-400 border-gray-700'
+                }`}>
+                  {isPasswordProtected ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-gray-200 flex items-center gap-2">
+                    <span>Proteção por Senha</span>
+                    {isPasswordProtected ? (
+                      <span className="text-[10px] font-bold px-2 py-0.2 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        Ativada
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold px-2 py-0.2 rounded-full bg-gray-800 text-gray-400 border border-gray-700">
+                        Desativada
+                      </span>
+                    )}
+                  </span>
+                  <p className="text-[11px] text-gray-400">
+                    {isPasswordProtected
+                      ? 'Exige senha para visitantes abrirem o bloco de notas.'
+                      : 'Acesso livre pelo link direto sem solicitar senha.'}
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
                 <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mínimo 3 dígitos..."
-                  className="w-full bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2 text-sm text-gray-900 dark:text-gray-100 outline-none focus:ring-2 focus:ring-brand-500/50 pr-10"
+                  type="checkbox"
+                  checked={isPasswordProtected}
+                  onChange={(e) => setIsPasswordProtected(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+              </label>
+            </div>
+
+            {/* Password input & controls when active */}
+            {isPasswordProtected && (
+              <div className="pt-2 border-t border-[#1a1a1a] space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <label className="text-gray-300 font-medium">
+                    {hasExistingPassword
+                      ? 'Alterar Senha de Acesso (deixe em branco para manter a atual):'
+                      : 'Defina a Senha de Acesso (mínimo 3 dígitos):'}
+                  </label>
+                  {hasExistingPassword && (
+                    <button
+                      type="button"
+                      onClick={handleDeactivatePassword}
+                      className="text-[11px] font-semibold text-rose-400 hover:text-rose-300 transition-colors"
+                      title="Desativar senha e liberar acesso público direto"
+                    >
+                      Desativar Senha Agora
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder={hasExistingPassword ? '●●●●● (Senha ativa — digite nova para trocar)' : 'Ex: 1234, segredo2026...'}
+                    className="w-full bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl px-3 py-2 text-xs text-gray-100 outline-none focus:border-amber-500 pr-10 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-gray-500">
+                  🔒 O criador da nota e os usuários autorizados selecionados abaixo entram diretamente sem precisar digitar esta senha.
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* 3. PERMISSÕES DE COLABORAÇÃO & OUTRAS OPÇÕES */}
+          <div className="p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Edit3 className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Permissão de Edição &amp; Opções do Link</span>
+              </label>
+            </div>
+
+            {/* Read-Only vs Collaborative Edit */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAllowEditing(false)}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  !allowEditing
+                    ? 'border-cyan-500/60 bg-cyan-950/20 text-cyan-200'
+                    : 'border-[#1c1c1c] bg-[#0c0c0c] text-gray-400 hover:border-gray-700 hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold text-xs mb-0.5">
+                  <Eye className="w-3.5 h-3.5" />
+                  <span>Somente Leitura (Padrão)</span>
+                </div>
+                <div className="text-[10px] text-gray-400">
+                  Visitantes podem visualizar mas não podem alterar o conteúdo.
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAllowEditing(true)}
+                className={`p-2.5 rounded-xl border text-left transition-all ${
+                  allowEditing
+                    ? 'border-purple-500/60 bg-purple-950/20 text-purple-200'
+                    : 'border-[#1c1c1c] bg-[#0c0c0c] text-gray-400 hover:border-gray-700 hover:text-gray-200'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold text-xs mb-0.5">
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edição Colaborativa</span>
+                </div>
+                <div className="text-[10px] text-gray-400">
+                  Visitantes com o link podem editar e salvar texto em tempo real.
+                </div>
+              </button>
+            </div>
+
+            {/* Expiration + Copy + Hide Author controls */}
+            <div className="pt-2 border-t border-[#1a1a1a] grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Expiration Select */}
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-gray-300 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-cyan-400" />
+                  <span>Expiração do Link:</span>
+                </label>
+                <select
+                  value={expirationOption}
+                  onChange={(e) => setExpirationOption(e.target.value as any)}
+                  className="w-full px-2.5 py-1.5 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] text-xs text-gray-200 outline-none focus:border-cyan-500"
+                >
+                  <option value="never">Nunca expira (Permanente)</option>
+                  <option value="1h">Expira em 1 hora</option>
+                  <option value="24h">Expira em 24 horas (1 dia)</option>
+                  <option value="7d">Expira em 7 dias (1 semana)</option>
+                  <option value="30d">Expira em 30 dias (1 mês)</option>
+                </select>
+              </div>
+
+              {/* Allow Copy */}
+              <label className="flex items-center gap-2 p-2 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] cursor-pointer hover:bg-[#121212] transition-colors self-end">
+                <input
+                  type="checkbox"
+                  checked={allowCopy}
+                  onChange={(e) => setAllowCopy(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-transparent"
+                />
+                <div className="text-xs">
+                  <span className="font-semibold text-gray-200 block text-[11px]">Permitir Cópia</span>
+                  <span className="text-gray-500 text-[10px]">Exibe botão copiar texto</span>
+                </div>
+              </label>
+
+              {/* Hide Author */}
+              <label className="flex items-center gap-2 p-2 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c] cursor-pointer hover:bg-[#121212] transition-colors self-end">
+                <input
+                  type="checkbox"
+                  checked={hideAuthor}
+                  onChange={(e) => setHideAuthor(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded text-cyan-500 focus:ring-0 bg-transparent"
+                />
+                <div className="text-xs">
+                  <span className="font-semibold text-gray-200 block text-[11px]">Ocultar Autor</span>
+                  <span className="text-gray-500 text-[10px]">Compartilhar anônimo</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          {/* 4. ID ÚNICO / SLUG PERSONALIZADO */}
+          <div className="p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
+                <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
+                <span>ID Único da Nota (/notpad/:id)</span>
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex-1 flex items-center bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl px-3 py-2 focus-within:border-cyan-500 transition-colors">
+                <span className="text-xs text-gray-500 select-none pr-1 truncate font-mono">
+                  {window.location.host}/notpad/
+                </span>
+                <input
+                  type="text"
+                  value={slug}
+                  onChange={handleSlugChange}
+                  placeholder={note.id}
+                  className="flex-1 bg-transparent text-xs text-gray-100 outline-none font-mono"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleUseNoteUniqueId}
+                title="Restaurar ID único original da nota"
+                className="p-2.5 rounded-xl border border-[#1c1c1c] bg-[#0c0c0c] hover:bg-[#141414] text-gray-300 transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              </button>
+            </div>
+
+            {isSlugConflict && (
+              <div className="flex items-center gap-1.5 text-xs text-rose-400">
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>Este identificador já está em uso por outro bloco. Por favor, escolha outro.</span>
+              </div>
+            )}
+          </div>
+
+          {/* 5. USUÁRIOS AUTORIZADOS DA PLATAFORMA (@username) */}
+          <div className="p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Users className="w-3.5 h-3.5 text-purple-400" />
+                <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">
+                  Usuários Autorizados da Plataforma (@username)
+                </span>
+              </div>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20 font-mono">
+                {allowedUsers.length} {allowedUsers.length === 1 ? 'autorizado' : 'autorizados'}
+              </span>
+            </div>
+
+            <p className="text-[11px] text-gray-400">
+              Libere acesso direto sem senha ou dê permissão de edição para contas cadastradas (ex: <strong className="text-cyan-400">@malaca</strong>).
+            </p>
+
+            {/* Input to search/add user */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <AtSign className="w-3.5 h-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={userSearchInput}
+                  onChange={(e) => setUserSearchInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddPlatformUser();
+                    }
+                  }}
+                  placeholder="Buscar ou digitar usuario (ex: @malaca)..."
+                  className="w-full bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-100 outline-none focus:border-cyan-500 font-mono"
+                />
+              </div>
+
+              <select
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as 'admin' | 'viewer')}
+                className="bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl px-2.5 py-2 text-xs text-gray-200 outline-none focus:border-cyan-500"
+              >
+                <option value="admin">Editor (Pode Editar)</option>
+                <option value="viewer">Leitor (Acesso Sem Senha)</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => handleAddPlatformUser()}
+                className="flex items-center gap-1 px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-colors shrink-0"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Adicionar</span>
+              </button>
+            </div>
+
+            {/* Quick-add suggestions */}
+            {filteredSuggestions.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 block">
+                  Usuários sugeridos na plataforma (clique para adicionar):
+                </span>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                  {filteredSuggestions.map((u) => (
+                    <button
+                      key={u.username}
+                      type="button"
+                      onClick={() => handleAddPlatformUser(u.username, u.full_name)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0c0c0c] hover:bg-[#141414] border border-[#1c1c1c] hover:border-purple-500/40 text-xs text-gray-300 transition-all"
+                    >
+                      <span className="w-4 h-4 rounded-full bg-purple-500/20 text-purple-400 font-bold text-[10px] flex items-center justify-center uppercase">
+                        {(u.full_name || u.username)[0]}
+                      </span>
+                      <span className="font-mono font-semibold text-purple-400">@{u.username}</span>
+                      {u.full_name && u.full_name.toLowerCase() !== u.username.toLowerCase() && (
+                        <span className="text-[11px] text-gray-500">({u.full_name})</span>
+                      )}
+                      <span className="text-[10px] text-emerald-400 font-bold ml-0.5">+</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Added users list */}
+            {allowedUsers.length > 0 && (
+              <div className="space-y-1.5 pt-2 border-t border-[#1a1a1a]">
+                <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                  {allowedUsers.map((u) => (
+                    <div
+                      key={u.username}
+                      className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c]"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 font-bold text-xs flex items-center justify-center uppercase shrink-0">
+                          {(u.full_name || u.username)[0]}
+                        </div>
+                        <div className="truncate">
+                          <span className="text-xs font-mono font-bold text-purple-400">
+                            @{u.username}
+                          </span>
+                          {u.full_name && (
+                            <span className="text-[11px] text-gray-400 ml-1.5">
+                              {u.full_name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleUserRole(u.username)}
+                          title="Clique para alternar permissão"
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-colors ${
+                            u.role === 'admin'
+                              ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                              : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          }`}
+                        >
+                          {u.role === 'admin' ? 'Editor (Pode Editar)' : 'Leitor (Sem Senha)'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePlatformUser(u.username)}
+                          className="p-1 text-gray-400 hover:text-rose-400 rounded-lg transition-colors"
+                          title="Remover permissão"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 6. CAIXA DO LINK & AÇÕES RÁPIDAS (WHATSAPP, TELEGRAM, QR CODE, COPIAR) */}
+          {isActive && (
+            <div className="p-3.5 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-gray-100 flex items-center gap-1.5">
+                  <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>URL de Compartilhamento:</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-400 font-mono">
+                    {note.share?.view_count || 0} visualizações
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                    <Cloud className="w-3 h-3" />
+                    <span>Nuvem Ativa</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* URL Box */}
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={getShareUrl()}
+                  className="flex-1 bg-[#050505] border border-[#1c1c1c] rounded-xl px-3 py-2 text-xs text-cyan-300 font-mono outline-none truncate"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
+                  onClick={handleCopyLink}
+                  disabled={isSaving}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-cyan-600/30 shrink-0"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? 'Copiado!' : 'Copiar Link'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenPublicView}
+                  disabled={isSaving}
+                  className="p-2 border border-[#1c1c1c] bg-[#0c0c0c] hover:bg-[#141414] text-gray-300 hover:text-white rounded-xl transition-colors shrink-0"
+                  title="Abrir em Nova Guia"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <p className="text-[11px] text-gray-500 mt-1.5">
-                🔒 O criador/admin do bloco de nota e os usuários selecionados acima (ex: <strong>@malaca</strong>) entram diretamente sem precisar digitar esta senha.
-              </p>
+
+              {/* Social & QR Code Share Row */}
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleShareWhatsApp}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/25 text-xs font-semibold transition-colors"
+                >
+                  <MessageCircle className="w-3.5 h-3.5" />
+                  <span>WhatsApp</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleShareTelegram}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/25 text-xs font-semibold transition-colors"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Telegram</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowQrCodeModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#121212] hover:bg-[#1a1a1a] text-gray-200 border border-[#222] text-xs font-semibold transition-colors"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>QR Code</span>
+                </button>
+              </div>
             </div>
           )}
-        </div>
 
-        {/* Copy Link Preview Section */}
-        {isActive && (
-          <div className="p-4 rounded-2xl bg-brand-500/5 border border-brand-500/25 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
-                <LinkIcon className="w-4 h-4 text-brand-400" />
-                URL Única do Bloco de Nota:
-              </span>
-              <span className="text-[11px] text-emerald-400 font-semibold flex items-center gap-1">
-                <Cloud className="w-3.5 h-3.5" />
-                Nuvem Ativa
-              </span>
-            </div>
-
-            {/* URL Box */}
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                readOnly
-                value={getShareUrl()}
-                className="flex-1 bg-white dark:bg-[#11131a] border border-gray-200 dark:border-[#232838] rounded-xl px-3 py-2 text-xs text-gray-700 dark:text-gray-300 font-mono outline-none truncate"
-              />
+          {/* Footer Actions */}
+          <div className="flex items-center justify-between pt-2 border-t border-[#1c1c1c]">
+            {note.share ? (
               <button
                 type="button"
-                onClick={handleCopyLink}
-                disabled={isSaving}
-                className="flex items-center gap-1.5 px-3.5 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm shrink-0"
+                onClick={handleRevokeShare}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors"
               >
-                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {copied ? 'Copiado!' : 'Copiar Link'}
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Revogar Link</span>
+              </button>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl bg-[#141414] hover:bg-[#1a1a1a] text-gray-300 text-xs font-semibold transition-colors"
+              >
+                Fechar
               </button>
               <button
                 type="button"
-                onClick={handleOpenPublicView}
-                disabled={isSaving}
-                className="p-2 border border-gray-200 dark:border-[#232838] bg-white dark:bg-[#11131a] hover:bg-gray-100 dark:hover:bg-[#181b24] text-gray-600 dark:text-gray-300 rounded-xl transition-colors shrink-0"
-                title="Abrir página pública"
+                onClick={handleSaveShare}
+                disabled={isSaving || isSlugConflict}
+                className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all flex items-center gap-1.5"
               >
-                <ExternalLink className="w-4 h-4" />
+                {isSaving ? 'Salvando...' : 'Salvar Alterações'}
               </button>
             </div>
           </div>
-        )}
+        </div>
+      </Modal>
 
-        {/* Actions Footer */}
-        <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-[#232838]">
-          {note.share ? (
-            <button
-              type="button"
-              onClick={handleRevokeShare}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Revogar link
-            </button>
-          ) : (
-            <div />
-          )}
-
+      {/* QR Code Popup Modal */}
+      <Modal
+        isOpen={showQrCodeModal}
+        onClose={() => setShowQrCodeModal(false)}
+        maxWidth="sm"
+        title={
           <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+              <QrCode className="w-4 h-4" />
+            </div>
+            <span className="text-sm font-bold text-gray-100">QR Code da Nota</span>
+          </div>
+        }
+      >
+        <div className="p-4 flex flex-col items-center gap-4 text-center">
+          <div className="p-3 bg-white rounded-2xl shadow-xl">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(getShareUrl())}`}
+              alt="QR Code da Nota"
+              className="w-56 h-56 rounded-lg block"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-xs font-semibold text-gray-200">
+              Aponte a câmera do seu celular
+            </p>
+            <p className="text-[11px] text-gray-400 font-mono truncate max-w-xs">
+              {getShareUrl()}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 w-full pt-1">
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl border border-gray-200 dark:border-[#232838] text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#181b24] transition-colors"
+              onClick={handleDownloadQr}
+              className="flex-1 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold shadow-lg shadow-cyan-600/30 transition-all flex items-center justify-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Baixar Imagem PNG</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowQrCodeModal(false)}
+              className="px-4 py-2.5 rounded-xl bg-[#141414] hover:bg-[#1a1a1a] text-gray-300 text-xs font-semibold transition-colors"
             >
               Fechar
             </button>
-            <button
-              type="button"
-              onClick={handleSaveShare}
-              disabled={isSaving || isSlugConflict}
-              className="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md shadow-brand-600/20 transition-all flex items-center gap-2"
-            >
-              {isSaving ? 'Salvando...' : 'Salvar Alterações'}
-            </button>
           </div>
         </div>
-      </div>
-    </Modal>
+      </Modal>
+    </>
   );
 };
