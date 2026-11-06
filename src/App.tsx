@@ -16,7 +16,8 @@ import { useNotes } from './hooks/useNotes';
 import { useAuth } from './hooks/useAuth';
 import { isUserAdmin } from './types/auth';
 import { PlatformSettingsService, type PlatformLimits } from './lib/platformSettings';
-import { getLocalNotes } from './lib/storage';
+import { StorageService, getLocalNotes } from './lib/storage';
+import { AuthService } from './lib/authService';
 import { CloudShareService } from './lib/cloudShare';
 import { FileText, Plus, Share2, Copy, Check, Settings, Home, ShieldCheck } from 'lucide-react';
 
@@ -45,6 +46,66 @@ export function MainLayout() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'account' | 'editor' | 'cloud' | 'security' | 'backup'>('editor');
   const [mobileCopiedLink, setMobileCopiedLink] = useState(false);
   const { error: toastError } = useToast();
+
+  const [isGuestMode, setIsGuestMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('7notpad_guest_mode') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Clear guest mode when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      setIsGuestMode(false);
+      try {
+        localStorage.removeItem('7notpad_guest_mode');
+      } catch {}
+    }
+  }, [isAuthenticated]);
+
+  const handleStartGuestWriting = (initialData?: { title?: string; content?: string }) => {
+    setIsGuestMode(true);
+    try {
+      localStorage.setItem('7notpad_guest_mode', 'true');
+    } catch {}
+    if (initialData && (initialData.title || initialData.content)) {
+      createNote({
+        title: initialData.title || 'Nota Rápida',
+        content: initialData.content ? `<p>${initialData.content.replace(/\n/g, '<br>')}</p>` : '<p></p>',
+      });
+    } else if (notes.length === 0) {
+      createNote({
+        title: 'Nota Rápida',
+        content: '<p></p>',
+      });
+    }
+  };
+
+  const handleExitGuestMode = () => {
+    setIsGuestMode(false);
+    try {
+      localStorage.removeItem('7notpad_guest_mode');
+    } catch {}
+    setActiveNoteId(null);
+  };
+
+  const handleCreateNoteWithGuestCheck = (tpl?: { title?: string; content?: string }) => {
+    if (!isAuthenticated) {
+      const maxNotes = platformLimits.guestMaxNotes || 3;
+      if (notes.length >= maxNotes) {
+        toastError(
+          'Limite de Notas de Visitante',
+          `No Modo Visitante você pode criar até ${maxNotes} notas locais. Crie uma conta gratuita para ter notas ilimitadas!`
+        );
+        setAuthModalView('signup');
+        setIsAuthModalOpen(true);
+        return;
+      }
+    }
+    createNote(tpl);
+  };
 
   // Listen to account suspension event
   useEffect(() => {
@@ -312,20 +373,27 @@ export function MainLayout() {
   const handleAuthSuccess = () => {
     setActiveNoteId(null);
     setPublicSlug(null);
+    setIsGuestMode(false);
     try {
+      localStorage.removeItem('7notpad_guest_mode');
       localStorage.removeItem('7notpad_active_note_id');
       const baseUrl = (import.meta as any).env?.BASE_URL || '/';
       const cleanBase = baseUrl === '/' ? '' : baseUrl.replace(/\/+$/, '');
       const targetUrl = `${cleanBase}/notpad`;
       window.history.pushState({}, '', targetUrl);
     } catch {}
+
+    const session = AuthService.getCurrentSession();
+    if (session && session.user) {
+      StorageService.migrateLocalNotesToUser(session.user.id);
+    }
     loadNotes();
   };
 
   // ========================================================
-  // 1. SE NÃO TIVER LOGADO: QUALQUER URL/SUB-URL VAI PARA TELA DE INÍCIO!
+  // 1. SE NÃO TIVER LOGADO E NÃO ESTIVER NO MODO VISITANTE: LANDING HOME
   // ========================================================
-  if (!isAuthenticated) {
+  if (!isAuthenticated && !isGuestMode) {
     return (
       <div className="min-h-screen flex flex-col bg-black">
         <GlobalAnnouncementBanner limits={platformLimits} isAuthenticated={false} currentUser={null} />
@@ -334,6 +402,7 @@ export function MainLayout() {
             setAuthModalView('signup');
             setIsAuthModalOpen(true);
           }}
+          onStartGuestWriting={handleStartGuestWriting}
           onOpenAuth={(view) => {
             setAuthModalView(view);
             setIsAuthModalOpen(true);
@@ -414,6 +483,12 @@ export function MainLayout() {
         isDashboard={!activeNoteId}
         onOpenAdmin={() => setIsAdminModalOpen(true)}
         isAdmin={isAdmin}
+        isGuest={!isAuthenticated}
+        onOpenSignUp={() => {
+          setAuthModalView('signup');
+          setIsAuthModalOpen(true);
+        }}
+        onExitGuest={handleExitGuestMode}
       />
 
       {/* Main Workspace Body */}
@@ -435,7 +510,7 @@ export function MainLayout() {
             setIsMobileSidebarOpen(false);
           }}
           onCreateNote={(tpl) => {
-            createNote(tpl);
+            handleCreateNoteWithGuestCheck(tpl);
             setIsMobileSidebarOpen(false);
           }}
           onDeleteNote={deleteNote}
@@ -457,15 +532,26 @@ export function MainLayout() {
               saveStatus={saveStatus}
               onOpenShareModal={() => setIsShareModalOpen(true)}
               onTogglePin={togglePin}
+              isGuest={!isAuthenticated}
+              guestMaxCharacters={platformLimits.guestMaxCharacters || 400}
+              onOpenSignUp={() => {
+                setAuthModalView('signup');
+                setIsAuthModalOpen(true);
+              }}
             />
           ) : (
             <UserDashboard
               user={user}
               notes={notes}
-              onCreateNote={(tpl) => createNote(tpl)}
+              onCreateNote={(tpl) => handleCreateNoteWithGuestCheck(tpl)}
               onSelectNote={(id) => setActiveNoteId(id)}
               onDeleteNote={deleteNote}
               onTogglePin={togglePin}
+              isGuest={!isAuthenticated}
+              onOpenSignUp={() => {
+                setAuthModalView('signup');
+                setIsAuthModalOpen(true);
+              }}
             />
           )}
         </main>
@@ -504,7 +590,7 @@ export function MainLayout() {
         <button
           type="button"
           onClick={() => {
-            createNote();
+            handleCreateNoteWithGuestCheck();
             setIsMobileSidebarOpen(false);
           }}
           className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 rounded-xl text-[10px] font-semibold text-brand-400 active:scale-95 transition-all"

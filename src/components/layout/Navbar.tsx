@@ -25,6 +25,9 @@ interface NavbarProps {
   isDashboard?: boolean;
   onOpenAdmin?: () => void;
   isAdmin?: boolean;
+  isGuest?: boolean;
+  onOpenSignUp?: () => void;
+  onExitGuest?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -36,6 +39,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   isDashboard = false,
   onOpenAdmin,
   isAdmin = false,
+  isGuest = false,
+  onOpenSignUp,
+  onExitGuest,
 }) => {
   const { theme, toggleTheme } = useTheme();
   const { user, isAuthenticated, logout } = useAuth();
@@ -240,14 +246,42 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={onOpenAuthModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md shadow-brand-600/25 transition-all active:scale-[0.98]"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Entrar</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {isGuest && (
+              <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] font-medium text-amber-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span>Modo Visitante (400 carac.)</span>
+              </span>
+            )}
+
+            {onExitGuest && isGuest && (
+              <button
+                type="button"
+                onClick={onExitGuest}
+                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-gray-400 hover:text-white hover:bg-[#121212] transition-colors"
+                title="Voltar para a página de início"
+              >
+                Início
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onOpenSignUp || onOpenAuthModal}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold shadow-md shadow-brand-600/25 transition-all active:scale-[0.98]"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Cadastrar</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onOpenAuthModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#222] bg-[#0c0c0c] hover:bg-[#151515] text-gray-200 text-xs font-semibold transition-all active:scale-[0.98]"
+            >
+              <span>Entrar</span>
+            </button>
+          </div>
         )}
       </div>
     </header>

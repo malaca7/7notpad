@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Sparkles, 
   ArrowRight, 
@@ -10,21 +10,28 @@ import {
   FolderOpen, 
   ShieldCheck, 
   User,
-  Radio
+  Radio,
+  Edit3,
+  AlertCircle
 } from 'lucide-react';
 import type { AuthModalView } from '../auth/AuthModal';
 
 interface LandingHomeProps {
   onStartWriting: () => void;
+  onStartGuestWriting: (initialData?: { title?: string; content?: string }) => void;
   onOpenAuth: (view: AuthModalView) => void;
   localNotesCount: number;
 }
 
 export const LandingHome: React.FC<LandingHomeProps> = ({
   onStartWriting,
+  onStartGuestWriting,
   onOpenAuth,
   localNotesCount,
 }) => {
+  const [quickTitle, setQuickTitle] = useState('');
+  const [quickContent, setQuickContent] = useState('');
+  const maxGuestChars = 400;
   return (
     <div className="min-h-[100dvh] bg-black text-gray-100 flex flex-col justify-between selection:bg-brand-500/30 selection:text-brand-300">
       {/* Subtle Ambient Radial Glow */}
@@ -47,6 +54,15 @@ export const LandingHome: React.FC<LandingHomeProps> = ({
 
         {/* Auth CTA Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => onStartGuestWriting()}
+            className="hidden sm:flex px-3 py-2 rounded-xl text-xs font-semibold text-amber-300 bg-amber-500/10 border border-amber-500/25 hover:bg-amber-500/20 transition-colors items-center gap-1.5"
+            title="Criar anotações rápidas sem precisar de cadastro (limite de 400 caracteres)"
+          >
+            <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+            <span>Criar Sem Cadastro</span>
+          </button>
           <button
             type="button"
             onClick={() => onOpenAuth('login')}
@@ -92,24 +108,36 @@ export const LandingHome: React.FC<LandingHomeProps> = ({
         </p>
 
         {/* CTA Buttons */}
-        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto mb-8">
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto mb-6">
           <button
             type="button"
-            onClick={onStartWriting}
+            onClick={() => onStartGuestWriting()}
             className="w-full sm:w-auto px-7 py-3.5 rounded-2xl bg-brand-600 hover:bg-brand-500 active:scale-[0.98] text-white font-bold text-sm shadow-xl shadow-brand-600/30 transition-all flex items-center justify-center gap-2 group"
           >
             <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
-            <span>Começar a Escrever</span>
+            <span>Criar Bloco Sem Cadastro</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/20 text-white font-mono font-medium">
+              Até 400 carac.
+            </span>
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
           </button>
 
           <button
             type="button"
-            onClick={() => onOpenAuth('login')}
-            className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-[#0a0a0a] hover:bg-[#121212] active:scale-[0.98] border border-[#1f1f1f] text-gray-200 font-semibold text-sm transition-all flex items-center justify-center gap-2"
+            onClick={() => onOpenAuth('signup')}
+            className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-[#0d0d0d] hover:bg-[#141414] active:scale-[0.98] border border-brand-500/30 text-brand-300 font-semibold text-sm transition-all flex items-center justify-center gap-2"
           >
-            <User className="w-4 h-4 text-brand-400" />
-            <span>Acessar com @usuario</span>
+            <Sparkles className="w-4 h-4 text-brand-400" />
+            <span>Cadastrar (Sem Limites)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onOpenAuth('login')}
+            className="w-full sm:w-auto px-5 py-3.5 rounded-2xl bg-[#0a0a0a] hover:bg-[#121212] active:scale-[0.98] border border-[#1f1f1f] text-gray-300 font-medium text-sm transition-all flex items-center justify-center gap-2"
+          >
+            <User className="w-4 h-4 text-gray-400" />
+            <span>Entrar</span>
           </button>
         </div>
 
@@ -117,14 +145,97 @@ export const LandingHome: React.FC<LandingHomeProps> = ({
         {localNotesCount > 0 && (
           <button
             type="button"
-            onClick={onStartWriting}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#080808] border border-[#1c1c1c] hover:border-brand-500/40 text-xs text-gray-300 hover:text-white transition-all mb-12 shadow-sm group"
+            onClick={() => onStartWriting()}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#080808] border border-[#1c1c1c] hover:border-brand-500/40 text-xs text-gray-300 hover:text-white transition-all mb-8 shadow-sm group"
           >
             <FolderOpen className="w-3.5 h-3.5 text-brand-400" />
             <span>Você possui <strong>{localNotesCount}</strong> nota(s) salvas neste dispositivo</span>
             <ArrowRight className="w-3 h-3 text-gray-500 group-hover:translate-x-1 transition-transform" />
           </button>
         )}
+
+        {/* Interactive Quick Notepad Area for Guests */}
+        <div className="w-full max-w-3xl rounded-3xl border border-[#1c1c1c] bg-[#070707] p-5 sm:p-6 shadow-2xl text-left my-4 relative overflow-hidden">
+          <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#141414] text-xs">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse" />
+              <span className="font-bold text-amber-300">Área para Criar Bloco Sem Cadastro</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                Visitante
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-gray-400">
+              <span className={quickContent.length >= maxGuestChars ? 'text-rose-400 font-bold' : 'text-gray-200'}>
+                {quickContent.length}
+              </span> / {maxGuestChars} caracteres
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <input
+              type="text"
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value.slice(0, 80))}
+              placeholder="Título da sua anotação..."
+              className="w-full bg-transparent text-lg sm:text-xl font-bold text-gray-100 placeholder:text-gray-600 outline-none border-b border-[#171717] focus:border-brand-500/40 pb-2 transition-colors"
+            />
+            <textarea
+              value={quickContent}
+              onChange={(e) => setQuickContent(e.target.value.slice(0, maxGuestChars))}
+              placeholder="Escreva suas ideias ou lembretes aqui sem precisar de cadastro (máx. 400 caracteres)..."
+              rows={4}
+              className="w-full bg-transparent text-sm text-gray-200 placeholder:text-gray-600 outline-none resize-none leading-relaxed"
+            />
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-1.5 bg-[#121212] rounded-full overflow-hidden my-3">
+            <div
+              className={`h-full transition-all duration-200 ${
+                quickContent.length >= maxGuestChars
+                  ? 'bg-rose-500'
+                  : quickContent.length >= maxGuestChars * 0.8
+                  ? 'bg-amber-500'
+                  : 'bg-brand-500'
+              }`}
+              style={{ width: `${Math.min(100, (quickContent.length / maxGuestChars) * 100)}%` }}
+            />
+          </div>
+
+          {quickContent.length >= maxGuestChars && (
+            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center gap-2 mb-3">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>Limite de 400 caracteres atingido para visitantes. Crie uma conta gratuita para escrever sem limites!</span>
+            </div>
+          )}
+
+          {/* Bottom Limitations & Actions */}
+          <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs border-t border-[#141414]">
+            <div className="text-[11px] text-gray-500">
+              ⚠️ <span className="text-gray-400 font-medium">Limitações de visitante:</span> máx. 400 caracteres, até 3 notas e sem anexos.
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onStartGuestWriting({ title: quickTitle, content: quickContent })}
+                className="px-3.5 py-2 rounded-xl bg-[#121212] hover:bg-[#1a1a1a] text-gray-200 hover:text-white font-semibold text-xs border border-[#222] transition-colors flex items-center gap-1.5"
+              >
+                <Edit3 className="w-3.5 h-3.5 text-brand-400" />
+                <span>Abrir no Editor Completo</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onOpenAuth('signup')}
+                className="px-3.5 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-600/20 transition-all flex items-center gap-1.5"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Desbloquear Ilimitado</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
         {/* Interactive / Visual App Preview Card */}
         <div className="w-full max-w-3xl rounded-3xl border border-[#1c1c1c] bg-[#050505] p-3 sm:p-5 shadow-2xl text-left my-4">

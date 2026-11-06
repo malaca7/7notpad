@@ -24,7 +24,9 @@ import {
   Check,
   Eye,
   Lock,
-  ShieldAlert
+  ShieldAlert,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 
 interface NoteEditorProps {
@@ -33,6 +35,9 @@ interface NoteEditorProps {
   saveStatus: SaveStatus;
   onOpenShareModal: () => void;
   onTogglePin?: () => void;
+  isGuest?: boolean;
+  guestMaxCharacters?: number;
+  onOpenSignUp?: () => void;
 }
 
 export const NoteEditor: React.FC<NoteEditorProps> = ({
@@ -41,6 +46,9 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   saveStatus,
   onOpenShareModal,
   onTogglePin,
+  isGuest = false,
+  guestMaxCharacters = 400,
+  onOpenSignUp,
 }) => {
   const { settings } = useEditorSettings();
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
@@ -101,14 +109,47 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       attributes: {
         class: 'focus:outline-none min-h-[350px] leading-relaxed',
       },
+      handleTextInput(view, from, to, text) {
+        if (isGuest) {
+          const currentLength = view.state.doc.textContent.length;
+          const rangeLength = to - from;
+          if (currentLength - rangeLength + text.length > guestMaxCharacters) {
+            return true; // Block typing beyond guest limit
+          }
+        }
+        return false;
+      },
+      handlePaste(view, event) {
+        if (isGuest) {
+          const pasteText = event.clipboardData?.getData('text/plain') || '';
+          const currentLength = view.state.doc.textContent.length;
+          const { from, to } = view.state.selection;
+          const rangeLength = to - from;
+          const available = Math.max(0, guestMaxCharacters - (currentLength - rangeLength));
+          if (available <= 0) return true; // block paste completely if already at limit
+          if (pasteText.length > available) {
+            const sliced = pasteText.slice(0, available);
+            view.dispatch(view.state.tr.replaceSelectionWith(view.state.schema.text(sliced)));
+            return true;
+          }
+        }
+        return false;
+      },
     },
     onUpdate: ({ editor }) => {
       if (!canEdit) return;
+      if (isGuest) {
+        const text = editor.getText();
+        if (text.length > guestMaxCharacters) {
+          const truncated = text.slice(0, guestMaxCharacters);
+          editor.commands.setContent(`<p>${truncated.replace(/\n/g, '<br>')}</p>`, { emitUpdate: false });
+        }
+      }
       const html = editor.getHTML();
       lastLocalHtmlRef.current = html;
       onUpdateNoteRef.current({ content: html });
     },
-  }, [note.id]);
+  }, [note.id, isGuest, guestMaxCharacters]);
 
   // Keep editor editable state in sync with permissions
   useEffect(() => {
@@ -275,6 +316,28 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
       </div>
 
+      {/* Guest Mode Notice Banner */}
+      {isGuest && (
+        <div className="px-4 py-2 border-b border-amber-500/25 bg-amber-500/10 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-300">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Modo Visitante (Sem Cadastro):</strong> Limite de {guestMaxCharacters} caracteres por bloco • Salvo apenas no seu navegador atual.
+            </span>
+          </div>
+          {onOpenSignUp && (
+            <button
+              type="button"
+              onClick={onOpenSignUp}
+              className="px-2.5 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-bold text-[11px] transition-colors flex items-center gap-1 shrink-0 shadow-sm"
+            >
+              <span>Criar Conta Gratuita (Sem Limites)</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Formatting Toolbar or Read-Only Banner */}
       {!canEdit ? (
         <div className="px-4 py-2 border-b border-[#1c1c1c] bg-[#080808] flex items-center justify-between text-xs">
@@ -327,12 +390,35 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             <EditorContent editor={editor} />
           </div>
 
+          {/* Guest Character Limit Alert */}
+          {isGuest && stats.chars >= guestMaxCharacters && (
+            <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>
+                  Você atingiu o limite de <strong>{guestMaxCharacters} caracteres</strong> do Modo Visitante. Crie uma conta gratuita para escrever sem limites e salvar na nuvem!
+                </span>
+              </div>
+              {onOpenSignUp && (
+                <button
+                  type="button"
+                  onClick={onOpenSignUp}
+                  className="px-3.5 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shrink-0 transition-all shadow-md shadow-brand-600/20"
+                >
+                  Cadastrar Grátis
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Attachments Section */}
           <AttachmentManager
             noteId={note.id}
             attachments={note.attachments || []}
             onAttachmentsChange={handleAttachmentsChange}
             readOnly={!canEdit}
+            isGuest={isGuest}
+            onOpenSignUp={onOpenSignUp}
           />
         </div>
       </div>
@@ -340,9 +426,31 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       {/* Editor Status Bar / Footer */}
       <div className="px-4 sm:px-6 py-2 border-t border-[#1c1c1c] bg-[#050505] text-[11px] text-gray-400 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <span>{stats.words} palavras</span>
-          <span>•</span>
-          <span>{stats.chars} caracteres</span>
+          {isGuest ? (
+            <div className="flex items-center gap-2.5">
+              <span className={stats.chars >= guestMaxCharacters ? 'text-rose-400 font-bold' : stats.chars >= guestMaxCharacters * 0.85 ? 'text-amber-400 font-medium' : 'text-gray-400'}>
+                {stats.chars} / {guestMaxCharacters} caracteres (Visitante)
+              </span>
+              <div className="w-20 sm:w-28 h-1.5 bg-[#171717] rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-200 ${
+                    stats.chars >= guestMaxCharacters
+                      ? 'bg-rose-500'
+                      : stats.chars >= guestMaxCharacters * 0.85
+                      ? 'bg-amber-500'
+                      : 'bg-brand-500'
+                  }`}
+                  style={{ width: `${Math.min(100, (stats.chars / guestMaxCharacters) * 100)}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <span>{stats.words} palavras</span>
+              <span>•</span>
+              <span>{stats.chars} caracteres</span>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

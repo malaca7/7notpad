@@ -1656,6 +1656,58 @@ export const AdminModal: React.FC<AdminModalProps> = ({
                 />
               </label>
 
+              {/* Guest / Anonymous Limits */}
+              <div className="p-3.5 rounded-xl bg-[#0a0a0a] border border-[#1c1c1c] space-y-3">
+                <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                  <span>Limitações do Modo Visitante (Sem Cadastro)</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-400 mb-1">
+                      Limite de Caracteres por Bloco (Visitante)
+                    </label>
+                    <input
+                      type="number"
+                      min={50}
+                      max={10000}
+                      value={limits.guestMaxCharacters ?? 400}
+                      onChange={(e) => setLimits(prev => ({ ...prev, guestMaxCharacters: Number(e.target.value) || 400 }))}
+                      className="w-full px-3 py-2 rounded-xl bg-[#050505] border border-[#222] text-xs text-gray-200 focus:border-brand-500/50 outline-none"
+                    />
+                    <span className="text-[10px] text-gray-500">Padrão: 400 caracteres</span>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-medium text-gray-400 mb-1">
+                      Máximo de Notas Locais (Visitante)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={50}
+                      value={limits.guestMaxNotes ?? 3}
+                      onChange={(e) => setLimits(prev => ({ ...prev, guestMaxNotes: Number(e.target.value) || 3 }))}
+                      className="w-full px-3 py-2 rounded-xl bg-[#050505] border border-[#222] text-xs text-gray-200 focus:border-brand-500/50 outline-none"
+                    />
+                    <span className="text-[10px] text-gray-500">Padrão: 3 notas</span>
+                  </div>
+                </div>
+
+                <label className="flex items-center justify-between pt-1 cursor-pointer">
+                  <div>
+                    <div className="text-xs font-medium text-gray-300">Permitir Anexos para Visitantes</div>
+                    <div className="text-[10px] text-gray-500">Se desativado, exige cadastro para upload de arquivos</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(limits.guestAllowAttachments)}
+                    onChange={(e) => setLimits(prev => ({ ...prev, guestAllowAttachments: e.target.checked }))}
+                    className="w-4 h-4 rounded text-brand-600 focus:ring-0 bg-transparent"
+                  />
+                </label>
+              </div>
+
               <label className="flex items-center justify-between p-3 rounded-xl bg-rose-500/5 border border-rose-500/20 cursor-pointer hover:bg-rose-500/10 transition-colors">
                 <div>
                   <div className="text-xs font-semibold text-rose-300">Modo de Manutenção</div>

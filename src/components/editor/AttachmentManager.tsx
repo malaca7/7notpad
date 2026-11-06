@@ -1,13 +1,15 @@
 import React, { useRef } from 'react';
 import type { Attachment } from '../../types/note';
 import { useToast } from '../common/Toast';
-import { Paperclip, FileText, Download, Trash2, Upload } from 'lucide-react';
+import { Paperclip, FileText, Download, Trash2, Upload, Lock } from 'lucide-react';
 
 interface AttachmentManagerProps {
   attachments: Attachment[];
   onAttachmentsChange: (attachments: Attachment[]) => void;
   noteId: string;
   readOnly?: boolean;
+  isGuest?: boolean;
+  onOpenSignUp?: () => void;
 }
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit
@@ -18,6 +20,8 @@ export const AttachmentManager: React.FC<AttachmentManagerProps> = ({
   onAttachmentsChange,
   noteId,
   readOnly = false,
+  isGuest = false,
+  onOpenSignUp,
 }) => {
   const { success, error } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -91,7 +95,17 @@ export const AttachmentManager: React.FC<AttachmentManagerProps> = ({
           </span>
         </div>
 
-        {!readOnly && (
+        {isGuest ? (
+          <button
+            type="button"
+            onClick={onOpenSignUp}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-medium text-amber-300 transition-colors"
+            title="Anexos bloqueados para visitantes sem cadastro"
+          >
+            <Lock className="w-3.5 h-3.5 text-amber-400" />
+            <span>Cadastre-se para Anexar</span>
+          </button>
+        ) : !readOnly ? (
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -100,8 +114,8 @@ export const AttachmentManager: React.FC<AttachmentManagerProps> = ({
             <Upload className="w-3.5 h-3.5 text-brand-400" />
             <span>Anexar Arquivo</span>
           </button>
-        )}
-        {!readOnly && (
+        ) : null}
+        {!readOnly && !isGuest && (
           <input
             ref={fileInputRef}
             type="file"

@@ -25,6 +25,9 @@ export interface PlatformLimits {
   allowPublicSharing: boolean; // default true
   allowUserRegistration: boolean; // default true
   allowAnonymousNotes: boolean; // default true
+  guestMaxCharacters: number; // default 400 caracteres para visitantes sem cadastro
+  guestMaxNotes: number; // default 3 notas locais para visitantes sem cadastro
+  guestAllowAttachments: boolean; // default false para visitantes sem cadastro
   maintenanceMode: boolean; // default false
   announcements?: AnnouncementItem[]; // Multiple announcements
   // Legacy fields kept synchronized with active announcements for 100% backward compatibility:
@@ -45,6 +48,9 @@ export const DEFAULT_PLATFORM_LIMITS: PlatformLimits = {
   allowPublicSharing: true,
   allowUserRegistration: true,
   allowAnonymousNotes: true,
+  guestMaxCharacters: 400,
+  guestMaxNotes: 3,
+  guestAllowAttachments: false,
   maintenanceMode: false,
   announcements: [],
   announcementBanner: '',

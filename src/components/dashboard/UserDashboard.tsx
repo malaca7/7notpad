@@ -28,6 +28,8 @@ interface UserDashboardProps {
   onSelectNote: (id: string) => void;
   onDeleteNote: (id: string) => void;
   onTogglePin?: (id: string) => void;
+  isGuest?: boolean;
+  onOpenSignUp?: () => void;
 }
 
 export const UserDashboard: React.FC<UserDashboardProps> = ({
@@ -37,6 +39,8 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   onSelectNote,
   onDeleteNote,
   onTogglePin,
+  isGuest = false,
+  onOpenSignUp,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'pinned' | 'shared'>('all');
@@ -184,7 +188,34 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto bg-black text-gray-100 p-4 sm:p-8 lg:p-10 select-none">
-      <div className="max-w-5xl mx-auto space-y-8">
+      <div className="max-w-5xl mx-auto space-y-6 sm:space-y-8">
+        {/* Guest Mode Limitation Banner */}
+        {isGuest && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5 border border-amber-500/30">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="space-y-0.5">
+                <h4 className="text-sm font-bold text-amber-200">Modo Visitante Ativo (Sem Cadastro)</h4>
+                <p className="text-xs text-amber-300/80 leading-relaxed max-w-2xl">
+                  Suas anotações ficam salvas somente no navegador atual, com limite de até 3 notas e 400 caracteres cada. Crie uma conta gratuita para desbloquear escrita ilimitada, anexos e sincronização na nuvem.
+                </p>
+              </div>
+            </div>
+            {onOpenSignUp && (
+              <button
+                type="button"
+                onClick={onOpenSignUp}
+                className="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-bold text-xs shadow-md shadow-brand-600/25 transition-all shrink-0 flex items-center gap-1.5 active:scale-95"
+              >
+                <span>Criar Conta Gratuita</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Welcome Banner Card */}
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#0c0d12] via-[#050505] to-black border border-[#1c1c1c] p-6 sm:p-8 shadow-2xl">
           <div className="absolute top-0 right-0 w-80 h-80 bg-brand-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
