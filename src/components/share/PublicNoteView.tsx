@@ -107,6 +107,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
   // Trigger debounced collaborative save when Admin/Editor modifies title or content
   const scheduleCollaborativeSave = useCallback(
     (nextTitle: string, nextContent: string) => {
+      if (!canEdit) return;
       const activeShare = latestShareRef.current || {
         id: slug,
         note_id: latestNoteIdRef.current || slug,
@@ -203,6 +204,7 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
   }, [content, editor]);
 
   const handleTitleEdit = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const nextTitle = e.target.value;
     latestTitleRef.current = nextTitle;
     setTitle(nextTitle);
@@ -276,10 +278,8 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
         setCanEdit(hasAdminEditRole);
         const roleLabel = directAccess.isCreator
           ? 'Criador'
-          : directAccess.role === 'admin'
-          ? 'Admin'
-          : directAccess.role === 'editor'
-          ? 'Editor'
+          : directAccess.isAdmin
+          ? 'Admin do Bloco'
           : 'Leitor Liberado';
         setDirectAccessBadge(
           `${roleLabel}${directAccess.matchedUser ? ` (${directAccess.matchedUser})` : ''}`
@@ -294,9 +294,9 @@ export const PublicNoteView: React.FC<PublicNoteViewProps> = ({ slug, onGoHome, 
         setContent(fullContent);
         return;
       } else {
-        // If owner permitted collaborative editing for visitors with link
-        setCanEdit(Boolean(result.share.allow_editing));
-        setDirectAccessBadge(result.share.allow_editing ? 'Editor Convidado' : null);
+        // Apenas o criador/admin da nota e quem foi adicionado como admin do bloco podem editar
+        setCanEdit(false);
+        setDirectAccessBadge(null);
       }
 
       if (result.share.is_password_protected) {

@@ -55,29 +55,51 @@ export function isNoteUnlockedInCurrentTab(noteId: string, passwordHash?: string
   return tabUnlockedHashes[noteId] === passwordHash;
 }
 
+export interface NoteAccessControl {
+  allowed: boolean;
+  isCreator: boolean;
+  isAdmin: boolean;
+  canEdit: boolean;
+  canManageShare: boolean;
+  canDelete: boolean;
+  role: 'creator' | 'admin' | 'viewer';
+  matchedUser?: string;
+  creatorUsername?: string;
+}
+
 /**
  * Check if the current browser/user is the creator/admin of the note or an authorized @username member.
- * Creator/admin and authorized @username members NEVER need to enter a password!
+ * REGRA: Apenas o criador/admin da nota e quem foi adicionado como 'admin' da nota pode editar, gerenciar e alterar configurações de compartilhamento!
  */
 export function hasDirectNoteAccess(
   note?: Partial<Note> | null,
   share?: NoteShare | null
-): {
-  allowed: boolean;
-  isCreator: boolean;
-  canEdit: boolean;
-  role: 'creator' | 'admin' | 'editor' | 'viewer';
-  matchedUser?: string;
-} {
+): NoteAccessControl {
   const currentOwnerToken = getOrCreateOwnerToken();
   const currentUser = AuthService.getCurrentUser();
+
+  const creatorUsername =
+    note?.owner_username ||
+    share?.owner_username ||
+    (currentUser && (note?.user_id === currentUser.id || share?.owner_user_id === currentUser.id)
+      ? currentUser.username
+      : undefined);
 
   // 1. Check owner_token match (creator in same browser)
   if (
     (note?.owner_token && note.owner_token === currentOwnerToken) ||
     (share?.owner_token && share.owner_token === currentOwnerToken)
   ) {
-    return { allowed: true, isCreator: true, canEdit: true, role: 'creator' };
+    return {
+      allowed: true,
+      isCreator: true,
+      isAdmin: true,
+      canEdit: true,
+      canManageShare: true,
+      canDelete: true,
+      role: 'creator',
+      creatorUsername,
+    };
   }
 
   // 2. Check if note exists in this browser's local notes as owned by this browser
@@ -89,7 +111,16 @@ export function hasDirectNoteAccess(
         const localNotes: Note[] = JSON.parse(raw);
         const found = localNotes.find((n) => n.id === noteId || n.share?.custom_slug === share?.custom_slug);
         if (found && (!found.owner_token || found.owner_token === currentOwnerToken)) {
-          return { allowed: true, isCreator: true, canEdit: true, role: 'creator' };
+          return {
+            allowed: true,
+            isCreator: true,
+            isAdmin: true,
+            canEdit: true,
+            canManageShare: true,
+            canDelete: true,
+            role: 'creator',
+            creatorUsername: found.owner_username || creatorUsername,
+          };
         }
       }
     } catch {}
@@ -99,14 +130,18 @@ export function hasDirectNoteAccess(
   if (currentUser) {
     const myUsername = currentUser.username.trim().toLowerCase().replace(/^@+/, '');
 
-    // 3a. Platform Admin (@malaca, etc.) has full editing privileges
+    // 3a. Platform Admin (@malaca, etc.) has full editing and managing privileges everywhere
     if (isUserAdmin(currentUser)) {
       return {
         allowed: true,
         isCreator: true,
+        isAdmin: true,
         canEdit: true,
+        canManageShare: true,
+        canDelete: true,
         role: 'admin',
         matchedUser: `@${myUsername} (Admin Global)`,
+        creatorUsername,
       };
     }
 
@@ -114,10 +149,20 @@ export function hasDirectNoteAccess(
     if (
       (note?.user_id && note.user_id === currentUser.id) ||
       (share?.owner_user_id && share.owner_user_id === currentUser.id) ||
-      (note?.owner_username && note.owner_username.toLowerCase() === myUsername) ||
-      (share?.owner_username && share.owner_username.toLowerCase() === myUsername)
+      (note?.owner_username && note.owner_username.trim().toLowerCase().replace(/^@+/, '') === myUsername) ||
+      (share?.owner_username && share.owner_username.trim().toLowerCase().replace(/^@+/, '') === myUsername)
     ) {
-      return { allowed: true, isCreator: true, canEdit: true, role: 'creator', matchedUser: `@${myUsername}` };
+      return {
+        allowed: true,
+        isCreator: true,
+        isAdmin: true,
+        canEdit: true,
+        canManageShare: true,
+        canDelete: true,
+        role: 'creator',
+        matchedUser: `@${myUsername} (Criador)`,
+        creatorUsername: myUsername,
+      };
     }
 
     // 3c. Authorized user match in share.allowed_users or note.share.allowed_users
@@ -127,19 +172,33 @@ export function hasDirectNoteAccess(
         (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUsername
       );
       if (match) {
-        const isEditorOrAdmin = match.role === 'admin' || (match as any).role === 'editor';
+        // REGRA DE OURO: Apenas 'admin' do bloco pode editar e mudar configurações de compartilhar!
+        const isNoteAdmin = match.role === 'admin';
         return {
           allowed: true,
           isCreator: false,
-          canEdit: isEditorOrAdmin,
-          role: match.role === 'admin' ? 'admin' : (match as any).role === 'editor' ? 'editor' : 'viewer',
-          matchedUser: `@${myUsername}`,
+          isAdmin: isNoteAdmin,
+          canEdit: isNoteAdmin,
+          canManageShare: isNoteAdmin,
+          canDelete: false,
+          role: isNoteAdmin ? 'admin' : 'viewer',
+          matchedUser: isNoteAdmin ? `@${myUsername} (Admin do Bloco)` : `@${myUsername} (Leitor)`,
+          creatorUsername,
         };
       }
     }
   }
 
-  return { allowed: false, isCreator: false, canEdit: false, role: 'viewer' };
+  return {
+    allowed: false,
+    isCreator: false,
+    isAdmin: false,
+    canEdit: false,
+    canManageShare: false,
+    canDelete: false,
+    role: 'viewer',
+    creatorUsername,
+  };
 }
 
 export function notifyRealtimeSubscribers(payload?: { type: string; noteId?: string; slug?: string }): void {
@@ -373,7 +432,7 @@ export const StorageService = {
     return { success: true };
   },
 
-  // Save collaborative edit made by the Creator or an authorized Admin/Editor (@username with role 'admin')
+  // Save collaborative edit made by the Creator or an authorized Admin (@username with role 'admin')
   async saveCollaborativeNoteEdit(params: {
     slug: string;
     noteId: string;
@@ -382,12 +441,22 @@ export const StorageService = {
     share: NoteShare;
     attachments?: Note['attachments'];
     createdAt?: string;
-  }): Promise<{ success: boolean; updatedAt: string }> {
+  }): Promise<{ success: boolean; updatedAt: string; error?: string }> {
     const now = new Date().toISOString();
     const localNotes = getLocalNotes();
     const existingLocal = localNotes.find(
       (n) => n.id === params.noteId || n.id === params.slug || n.share?.custom_slug === params.slug
     );
+
+    // REGRA DE OURO: Apenas criador/admin da nota e admin adicionado podem editar!
+    const access = hasDirectNoteAccess(existingLocal, params.share);
+    if (!access.canEdit) {
+      return {
+        success: false,
+        updatedAt: now,
+        error: 'Apenas o criador ou administradores adicionados a este bloco de notas podem editar.',
+      };
+    }
 
     const updatedShare: NoteShare = {
       ...params.share,
@@ -452,14 +521,24 @@ export const StorageService = {
     return { success: true, updatedAt: now };
   },
 
-  // Delete note
+  // Delete note (only creator or global admin can delete)
   async deleteNote(noteId: string): Promise<boolean> {
+    const localNotes = getLocalNotes();
+    const existing = localNotes.find(n => n.id === noteId || n.local_id === noteId);
+    if (existing) {
+      const access = hasDirectNoteAccess(existing, existing.share);
+      if (!access.canDelete) {
+        console.warn('Unauthorized attempt to delete note:', noteId);
+        return false;
+      }
+    }
+
     // 1. Mark as tombstone locally so background fetch never resurrects it
     markNoteAsDeletedLocally(noteId);
 
     // 2. Remove from local storage immediately
-    const localNotes = getLocalNotes().filter(n => n.id !== noteId && n.local_id !== noteId);
-    saveLocalNotes(localNotes);
+    const filteredNotes = localNotes.filter(n => n.id !== noteId && n.local_id !== noteId);
+    saveLocalNotes(filteredNotes);
 
     const shares = getLocalShares();
     const updatedShares = { ...shares };
@@ -492,14 +571,23 @@ export const StorageService = {
 
   // Save / Update Share
   async saveShare(share: NoteShare): Promise<{ success: boolean; error?: string }> {
+    const localNotes = getLocalNotes();
+    const note = localNotes.find(n => n.id === share.note_id);
+
+    // REGRA DE OURO: Apenas criador/admin da nota e quem foi adicionado como admin do bloco de nota podem mudar configurações de compartilhar!
+    const access = hasDirectNoteAccess(note, share);
+    if (!access.canManageShare) {
+      return {
+        success: false,
+        error: 'Apenas o criador ou administradores adicionados a este bloco de notas podem alterar as configurações de compartilhamento.',
+      };
+    }
+
     // 1. Local storage persistence immediately
     const localShares = getLocalShares();
     localShares[share.custom_slug] = share;
     localShares[share.note_id] = share;
     saveLocalShares(localShares);
-
-    const localNotes = getLocalNotes();
-    const note = localNotes.find(n => n.id === share.note_id);
     if (note) {
       note.share = share;
       saveLocalNotes(localNotes);

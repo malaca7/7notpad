@@ -19,6 +19,7 @@ import {
   X
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { hasDirectNoteAccess } from '../../lib/storage';
 
 interface UserDashboardProps {
   user: UserProfile | null;
@@ -380,6 +381,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               {filteredNotes.map((note) => {
                 const excerpt = getExcerpt(note.content);
                 const isShared = Boolean(note.share && note.share.is_active);
+                const noteAccess = hasDirectNoteAccess(note, note.share);
                 const myUser = user ? user.username.trim().toLowerCase().replace(/^@+/, '') : '';
                 const mySharedAccess = note.share?.allowed_users?.find(
                   (u) => u.username.trim().toLowerCase().replace(/^@+/, '') === myUser
@@ -414,17 +416,19 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setNoteToDelete(note.id);
-                            }}
-                            className="p-1 rounded-lg text-gray-500 hover:text-rose-500 hover:bg-rose-500/10 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                            title="Excluir nota"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {noteAccess.canDelete && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setNoteToDelete(note.id);
+                              }}
+                              className="p-1 rounded-lg text-gray-500 hover:text-rose-500 hover:bg-rose-500/10 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                              title="Excluir nota"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
 

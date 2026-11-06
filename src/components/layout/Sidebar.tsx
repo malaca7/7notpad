@@ -15,6 +15,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { hasDirectNoteAccess } from '../../lib/storage';
 
 interface SidebarProps {
   notes: Note[];
@@ -280,6 +281,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               const isActive = note.id === activeNoteId;
               const excerpt = getExcerpt(note.content);
               const isShared = Boolean(note.share && note.share.is_active);
+              const noteAccess = hasDirectNoteAccess(note, note.share);
 
               return (
                 <div
@@ -305,18 +307,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       {note.title.trim() || 'Nota sem título'}
                     </h3>
 
-                    {/* Delete button (visible on mobile touch + on hover on desktop) */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setNoteToDelete(note.id);
-                      }}
-                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 rounded-lg text-gray-500 hover:text-rose-500 hover:bg-rose-500/10 transition-all shrink-0"
-                      title="Excluir nota"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {/* Delete button (visible on mobile touch + on hover on desktop, only if allowed to delete) */}
+                    {noteAccess.canDelete && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setNoteToDelete(note.id);
+                        }}
+                        className="opacity-100 md:opacity-0 md:group-hover:opacity-100 p-1 rounded-lg text-gray-500 hover:text-rose-500 hover:bg-rose-500/10 transition-all shrink-0"
+                        title="Excluir nota"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
 
                   <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">

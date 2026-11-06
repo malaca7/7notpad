@@ -12,6 +12,7 @@ import { EditorToolbar } from './EditorToolbar';
 import { ImageUploadModal } from './ImageUploadModal';
 import { AttachmentManager } from './AttachmentManager';
 import { useEditorSettings } from '../../hooks/useEditorSettings';
+import { hasDirectNoteAccess } from '../../lib/storage';
 import { 
   CheckCircle2, 
   Loader2, 
@@ -20,7 +21,10 @@ import {
   Pin, 
   Clock,
   Copy,
-  Check
+  Check,
+  Eye,
+  Lock,
+  ShieldAlert
 } from 'lucide-react';
 
 interface NoteEditorProps {
@@ -45,6 +49,11 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   const onUpdateNoteRef = useRef(onUpdateNote);
   onUpdateNoteRef.current = onUpdateNote;
   const lastLocalHtmlRef = useRef<string>(note.content || '');
+
+  // Apenas o criador/admin da nota ou quem foi adicionado como Admin do Bloco pode editar e mudar configurações
+  const access = useMemo(() => hasDirectNoteAccess(note, note.share), [note, note.share]);
+  const canEdit = access.canEdit;
+  const canManageShare = access.canManageShare;
 
   const getNoteUrl = () => {
     const baseUrl = (import.meta as any).env?.BASE_URL || '/';
@@ -87,17 +96,26 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
       }),
     ],
     content: note.content || '',
+    editable: canEdit,
     editorProps: {
       attributes: {
         class: 'focus:outline-none min-h-[350px] leading-relaxed',
       },
     },
     onUpdate: ({ editor }) => {
+      if (!canEdit) return;
       const html = editor.getHTML();
       lastLocalHtmlRef.current = html;
       onUpdateNoteRef.current({ content: html });
     },
   }, [note.id]);
+
+  // Keep editor editable state in sync with permissions
+  useEffect(() => {
+    if (editor) {
+      editor.setEditable(canEdit);
+    }
+  }, [editor, canEdit]);
 
   // Keep editor content in sync when active note changes or when remote/cross-tab sync updates note.content
   useEffect(() => {
@@ -110,18 +128,21 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
   }, [note.id, note.content, editor]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEdit) return;
     const newTitle = e.target.value;
     setTitle(newTitle);
     onUpdateNote({ title: newTitle });
   };
 
   const handleInsertImage = (url: string) => {
+    if (!canEdit) return;
     if (editor) {
       editor.chain().focus().setImage({ src: url }).run();
     }
   };
 
   const handleAttachmentsChange = (attachments: Attachment[]) => {
+    if (!canEdit) return;
     onUpdateNote({ attachments });
   };
 
@@ -238,13 +259,14 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
           <button
             type="button"
             onClick={onOpenShareModal}
+            title={canManageShare ? 'Configurar compartilhamento' : 'Visualizar configurações de compartilhamento (Somente Leitura)'}
             className={`flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
               isShared
                 ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-brand-600/30 ring-2 ring-brand-400/50'
                 : 'border border-[#1c1c1c] bg-[#0d0d0d] hover:bg-[#171717] text-gray-200'
             }`}
           >
-            <Share2 className="w-3.5 h-3.5" />
+            {canManageShare ? <Share2 className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5 text-amber-400" />}
             <span>Compartilhar</span>
             {isShared && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
@@ -253,24 +275,52 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
         </div>
       </div>
 
-      {/* Formatting Toolbar */}
-      <EditorToolbar
-        editor={editor}
-        onOpenImageModal={() => setIsImageModalOpen(true)}
-        noteTitle={title}
-      />
+      {/* Formatting Toolbar or Read-Only Banner */}
+      {!canEdit ? (
+        <div className="px-4 py-2 border-b border-[#1c1c1c] bg-[#080808] flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2 text-amber-400">
+            <ShieldAlert className="w-4 h-4 shrink-0" />
+            <span className="font-medium">
+              Modo Visualizador: Apenas o criador ou administradores do bloco podem editar o conteúdo.
+            </span>
+          </div>
+          {access.role && (
+            <span className="text-[11px] px-2 py-0.5 rounded-md bg-[#121212] border border-[#222] font-mono text-gray-400">
+              Permissão: {access.role === 'admin' ? 'Admin' : 'Leitor'}
+            </span>
+          )}
+        </div>
+      ) : (
+        <EditorToolbar
+          editor={editor}
+          onOpenImageModal={() => setIsImageModalOpen(true)}
+          noteTitle={title}
+        />
+      )}
 
       {/* Editor Content Area */}
       <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-5 sm:py-6">
         <div className={`mx-auto ${maxWidthClass} space-y-5 sm:space-y-6`}>
-          {/* Note Title Input */}
-          <input
-            type="text"
-            value={title}
-            onChange={handleTitleChange}
-            placeholder="Título da nota..."
-            className="w-full bg-transparent text-xl sm:text-3xl font-bold tracking-tight text-gray-100 placeholder:text-gray-600 outline-none border-b border-transparent focus:border-brand-500/30 pb-2 transition-colors"
-          />
+          {/* Note Title Input with ReadOnly Badge */}
+          <div className="flex items-center gap-3">
+            <input
+              type="text"
+              value={title}
+              onChange={handleTitleChange}
+              readOnly={!canEdit}
+              disabled={!canEdit}
+              placeholder="Título da nota..."
+              className={`w-full bg-transparent text-xl sm:text-3xl font-bold tracking-tight text-gray-100 placeholder:text-gray-600 outline-none border-b border-transparent ${
+                canEdit ? 'focus:border-brand-500/30' : 'cursor-default opacity-90'
+              } pb-2 transition-colors`}
+            />
+            {!canEdit && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium shrink-0">
+                <Eye className="w-3.5 h-3.5" />
+                <span>Somente Leitura</span>
+              </div>
+            )}
+          </div>
 
           {/* TipTap Document Body */}
           <div className={`${fontClass} ${fontSizeClass} ${lineSpacingClass} text-gray-200 min-h-[260px] sm:min-h-[300px]`}>
@@ -282,6 +332,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({
             noteId={note.id}
             attachments={note.attachments || []}
             onAttachmentsChange={handleAttachmentsChange}
+            readOnly={!canEdit}
           />
         </div>
       </div>

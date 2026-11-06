@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
 import type { Note, NoteShare, SharedUserAccess, ShareAccessType } from '../../types/note';
-import { StorageService, markNoteUnlockedInCurrentTab } from '../../lib/storage';
+import { StorageService, markNoteUnlockedInCurrentTab, hasDirectNoteAccess } from '../../lib/storage';
 import { AuthService } from '../../lib/authService';
 import { generateSalt, hashPassword, slugify } from '../../lib/crypto';
 import { useToast } from '../common/Toast';
@@ -30,7 +30,9 @@ import {
   Download,
   MessageCircle,
   Send,
-  Edit3
+  Edit3,
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 
 interface ShareModalProps {
@@ -47,6 +49,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   onShareUpdated,
 }) => {
   const { success, error } = useToast();
+
+  // Apenas o criador/admin da nota ou quem foi adicionado como Admin do Bloco pode alterar/gerenciar configurações
+  const access = hasDirectNoteAccess(note, note.share);
+  const canManageShare = access.canManageShare;
 
   // Core share activation and link slug
   const [isActive, setIsActive] = useState<boolean>(note.share ? note.share.is_active : true);
@@ -204,6 +210,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   // Add platform user (@username) to allowedUsers
   const handleAddPlatformUser = async (rawUsername?: string, fullName?: string) => {
+    if (!canManageShare) {
+      error('Permissão Negada', 'Apenas o criador ou administradores podem adicionar membros.');
+      return;
+    }
+
     const target = (rawUsername ?? userSearchInput).trim().toLowerCase().replace(/^@+/, '');
     if (!target || target.length < 2) {
       error('Usuário inválido', 'Digite um @usuario válido (ex: @malaca).');
@@ -230,12 +241,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleRemovePlatformUser = async (username: string) => {
+    if (!canManageShare) {
+      error('Permissão Negada', 'Apenas o criador ou administradores podem remover membros.');
+      return;
+    }
+
     const nextUsers = allowedUsers.filter((u) => u.username.toLowerCase() !== username.toLowerCase());
     setAllowedUsers(nextUsers);
     await executeSave(false, nextUsers);
   };
 
   const handleToggleUserRole = async (username: string) => {
+    if (!canManageShare) {
+      error('Permissão Negada', 'Apenas o criador ou administradores podem alterar cargos.');
+      return;
+    }
+
     const nextUsers = allowedUsers.map((u) =>
       u.username.toLowerCase() === username.toLowerCase()
         ? { ...u, role: (u.role === 'admin' ? 'viewer' : 'admin') as 'admin' | 'viewer' }
@@ -276,6 +297,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     customAllowedUsers?: SharedUserAccess[],
     overridePasswordProtected?: boolean
   ): Promise<{ success: boolean; error?: string; cloudSynced?: boolean }> => {
+    if (!canManageShare) {
+      return {
+        success: false,
+        error: 'Apenas o criador ou administradores adicionados a este bloco de notas podem alterar as configurações de compartilhamento.',
+      };
+    }
+
     const cleanSlug = slugify(slug);
     if (!cleanSlug || cleanSlug.length < 3) {
       return { success: false, error: 'O identificador precisa conter pelo menos 3 caracteres.' };
@@ -508,6 +536,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         maxWidth="lg"
       >
         <div className="space-y-4 max-h-[78vh] overflow-y-auto pr-1">
+          {/* Read-Only Alert Banner if user is not creator and not added as note admin */}
+          {!canManageShare && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-xs text-amber-200">
+              <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                  <span>Modo Somente Leitura</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono">
+                    Visualizador
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-200/80 leading-relaxed">
+                  Apenas o <strong>criador</strong> {access.creatorUsername ? `(@${access.creatorUsername})` : ''} ou quem foi adicionado como <strong>Admin do Bloco</strong> tem permissão para editar o conteúdo e alterar as opções de compartilhamento desta nota.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Active Switch Bar */}
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#080808] border border-[#1c1c1c]">
             <div className="space-y-0.5">
@@ -860,6 +906,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                 <AtSign className="w-3.5 h-3.5 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
+                  disabled={!canManageShare}
                   value={userSearchInput}
                   onChange={(e) => setUserSearchInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -868,24 +915,26 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                       handleAddPlatformUser();
                     }
                   }}
-                  placeholder="Buscar ou digitar usuario (ex: @malaca)..."
-                  className="w-full bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-100 outline-none focus:border-cyan-500 font-mono"
+                  placeholder={canManageShare ? "Buscar ou digitar usuario (ex: @malaca)..." : "Apenas o criador/admin pode adicionar membros"}
+                  className={`w-full bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl pl-8 pr-3 py-2 text-xs text-gray-100 outline-none focus:border-cyan-500 font-mono ${!canManageShare ? 'opacity-50 cursor-not-allowed' : ''}`}
                 />
               </div>
 
               <select
+                disabled={!canManageShare}
                 value={newUserRole}
                 onChange={(e) => setNewUserRole(e.target.value as 'admin' | 'viewer')}
-                className="bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl px-2.5 py-2 text-xs text-gray-200 outline-none focus:border-cyan-500"
+                className={`bg-[#0c0c0c] border border-[#1c1c1c] rounded-xl px-2.5 py-2 text-xs text-gray-200 outline-none focus:border-cyan-500 ${!canManageShare ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                <option value="admin">Editor (Pode Editar)</option>
-                <option value="viewer">Leitor (Acesso Sem Senha)</option>
+                <option value="admin">🛡️ Admin do Bloco (Pode Editar & Compartilhar)</option>
+                <option value="viewer">👁️ Leitor (Apenas Visualização)</option>
               </select>
 
               <button
                 type="button"
+                disabled={!canManageShare}
                 onClick={() => handleAddPlatformUser()}
-                className="flex items-center gap-1 px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-colors shrink-0"
+                className={`flex items-center gap-1 px-3 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition-colors shrink-0 ${!canManageShare ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 <span>Adicionar</span>
@@ -893,7 +942,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
 
             {/* Quick-add suggestions */}
-            {filteredSuggestions.length > 0 && (
+            {canManageShare && filteredSuggestions.length > 0 && (
               <div className="space-y-1.5 pt-1">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 block">
                   Usuários sugeridos na plataforma (clique para adicionar):
@@ -920,44 +969,66 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               </div>
             )}
 
-            {/* Added users list */}
-            {allowedUsers.length > 0 && (
-              <div className="space-y-1.5 pt-2 border-t border-[#1a1a1a]">
-                <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                  {allowedUsers.map((u) => (
-                    <div
-                      key={u.username}
-                      className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c]"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 font-bold text-xs flex items-center justify-center uppercase shrink-0">
-                          {(u.full_name || u.username)[0]}
-                        </div>
-                        <div className="truncate">
-                          <span className="text-xs font-mono font-bold text-purple-400">
-                            @{u.username}
-                          </span>
-                          {u.full_name && (
-                            <span className="text-[11px] text-gray-400 ml-1.5">
-                              {u.full_name}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+            {/* Added users and Creator list */}
+            <div className="space-y-1.5 pt-2 border-t border-[#1a1a1a]">
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {/* Note Creator Header Entry */}
+                <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
+                      👑
+                    </div>
+                    <div className="truncate">
+                      <span className="text-xs font-mono font-bold text-amber-300">
+                        @{access.creatorUsername || note.owner_username || 'Criador'}
+                      </span>
+                      <span className="text-[11px] text-amber-400/80 ml-1.5 font-semibold">
+                        (Criador / Dono)
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-amber-400" />
+                    <span>Criador / Admin</span>
+                  </span>
+                </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleUserRole(u.username)}
-                          title="Clique para alternar permissão"
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-colors ${
-                            u.role === 'admin'
-                              ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
-                              : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                          }`}
-                        >
-                          {u.role === 'admin' ? 'Editor (Pode Editar)' : 'Leitor (Sem Senha)'}
-                        </button>
+                {allowedUsers.map((u) => (
+                  <div
+                    key={u.username}
+                    className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-[#0c0c0c] border border-[#1c1c1c]"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-400 font-bold text-xs flex items-center justify-center uppercase shrink-0">
+                        {(u.full_name || u.username)[0]}
+                      </div>
+                      <div className="truncate">
+                        <span className="text-xs font-mono font-bold text-purple-400">
+                          @{u.username}
+                        </span>
+                        {u.full_name && (
+                          <span className="text-[11px] text-gray-400 ml-1.5">
+                            {u.full_name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={!canManageShare}
+                        onClick={() => handleToggleUserRole(u.username)}
+                        title={canManageShare ? "Clique para alternar permissão" : "Apenas o criador ou admins podem mudar cargos"}
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border transition-colors ${
+                          u.role === 'admin'
+                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                        } ${!canManageShare ? 'opacity-60 cursor-not-allowed' : ''}`}
+                      >
+                        {u.role === 'admin' ? '🛡️ Admin do Bloco (Pode Editar & Compartilhar)' : '👁️ Leitor (Apenas Visualização)'}
+                      </button>
+                      {canManageShare && (
                         <button
                           type="button"
                           onClick={() => handleRemovePlatformUser(u.username)}
@@ -966,12 +1037,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
-                      </div>
+                      )}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
-            )}
+            </div>
           </div>
 
           {/* 6. CAIXA DO LINK & AÇÕES RÁPIDAS (WHATSAPP, TELEGRAM, QR CODE, COPIAR) */}

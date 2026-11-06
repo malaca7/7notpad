@@ -7,6 +7,7 @@ interface AttachmentManagerProps {
   attachments: Attachment[];
   onAttachmentsChange: (attachments: Attachment[]) => void;
   noteId: string;
+  readOnly?: boolean;
 }
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit
@@ -16,11 +17,13 @@ export const AttachmentManager: React.FC<AttachmentManagerProps> = ({
   attachments,
   onAttachmentsChange,
   noteId,
+  readOnly = false,
 }) => {
   const { success, error } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (readOnly) return;
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -88,21 +91,25 @@ export const AttachmentManager: React.FC<AttachmentManagerProps> = ({
           </span>
         </div>
 
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-[#181b24] hover:bg-gray-200 dark:hover:bg-[#202430] border border-gray-200 dark:border-[#232838] text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors"
-        >
-          <Upload className="w-3.5 h-3.5 text-brand-400" />
-          <span>Anexar Arquivo</span>
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          onChange={handleFileUpload}
-          className="hidden"
-        />
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-[#181b24] hover:bg-gray-200 dark:hover:bg-[#202430] border border-gray-200 dark:border-[#232838] text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5 text-brand-400" />
+            <span>Anexar Arquivo</span>
+          </button>
+        )}
+        {!readOnly && (
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+        )}
       </div>
 
       {attachments.length === 0 ? (
@@ -139,14 +146,16 @@ export const AttachmentManager: React.FC<AttachmentManagerProps> = ({
                     <Download className="w-3.5 h-3.5" />
                   </a>
                 )}
-                <button
-                  type="button"
-                  onClick={() => handleRemoveAttachment(att.id)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
-                  title="Remover anexo"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAttachment(att.id)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
+                    title="Remover anexo"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
