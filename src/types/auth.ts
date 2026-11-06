@@ -15,8 +15,8 @@ export type UserRole = 'admin' | 'user';
 export function isUserAdmin(user?: UserProfile | null): boolean {
   if (!user) return false;
   if (user.role === 'admin') return true;
-  const username = (user.username || '').replace(/^@/, '').trim().toLowerCase();
-  return username === 'malaca';
+  const username = (user.username || '').replace(/^@+/, '').trim().toLowerCase();
+  return username === 'malaca' || username === 'malaca7x';
 }
 
 export interface UserProfile {

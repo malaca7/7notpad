@@ -79,20 +79,56 @@ export function normalizeSecurityAnswer(str?: string): string {
     .replace(/\s+/g, ' ');
 }
 
+export const ROOT_ADMIN_USERNAME = 'malaca';
+export const ROOT_ADMIN_DEFAULT_PASSWORD = '199425';
+
+export function getBuiltinOwnerUser(): StoredUser {
+  return {
+    id: 'usr_malaca_admin',
+    full_name: 'Malaca',
+    username: 'malaca',
+    email: 'malaca@7notpad.com',
+    role: 'admin',
+    birth_date: '1994-06-25',
+    security_question: 'Qual o nome do seu primeiro animal de estimação?',
+    security_answer: 'zeus',
+    password_salt: 'malaca_super_salt_2026',
+    password_hash: '8df8484584e4a42734a7717101bb372c47f76b3756d5e0a3f213577766509813',
+    email_verified: true,
+    is_banned: false,
+    created_at: '2026-11-01T00:00:00.000Z',
+    updated_at: new Date().toISOString(),
+  };
+}
+
 // Local Database Helpers (Local-First resilient storage)
 function getLocalUsers(): StoredUser[] {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    const users: StoredUser[] = raw ? JSON.parse(raw) : [];
+    let users: StoredUser[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(users)) users = [];
+
+    // Ensure built-in owner @malaca is always present in local database
+    const hasMalaca = users.some(
+      (u) => (u.username || '').toLowerCase().replace(/^@+/, '') === 'malaca'
+    );
+    if (!hasMalaca) {
+      users.unshift(getBuiltinOwnerUser());
+      try {
+        localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+      } catch {}
+    }
+
     for (const u of users) {
-      if (u.username && u.username.toLowerCase() === 'malaca') {
+      const clean = (u.username || '').toLowerCase().replace(/^@+/, '');
+      if (clean === 'malaca' || clean === 'malaca7x') {
         u.role = 'admin';
         u.is_banned = false;
       }
     }
     return users;
   } catch {
-    return [];
+    return [getBuiltinOwnerUser()];
   }
 }
 
@@ -205,7 +241,8 @@ export const AuthService = {
       if (!data) return null;
       const session = JSON.parse(data) as AuthSession;
       if (session && session.user) {
-        if (session.user.username?.toLowerCase() === 'malaca') {
+        const cleanUser = (session.user.username || '').toLowerCase().replace(/^@+/, '');
+        if (cleanUser === 'malaca' || cleanUser === 'malaca7x') {
           session.user.role = 'admin';
           session.user.is_banned = false;
         } else if (session.user.is_banned) {
@@ -223,7 +260,8 @@ export const AuthService = {
   getCurrentUser(): UserProfile | null {
     const session = this.getCurrentSession();
     if (!session || !session.user) return null;
-    if (session.user.username?.toLowerCase() === 'malaca') {
+    const cleanUser = (session.user.username || '').toLowerCase().replace(/^@+/, '');
+    if (cleanUser === 'malaca' || cleanUser === 'malaca7x') {
       session.user.role = 'admin';
       session.user.is_banned = false;
     } else if (session.user.is_banned) {
@@ -237,8 +275,8 @@ export const AuthService = {
     if (!session || !session.user) return null;
 
     const cleanUsername = session.user.username?.toLowerCase().replace(/^@+/, '');
-    if (cleanUsername === 'malaca') {
-      if (session.user.role !== 'admin') {
+    if (cleanUsername === 'malaca' || cleanUsername === 'malaca7x') {
+      if (session.user.role !== 'admin' || session.user.is_banned) {
         session.user.role = 'admin';
         session.user.is_banned = false;
         saveLocalSession(session);
@@ -740,95 +778,106 @@ export const AuthService = {
     session?: AuthSession; 
     error?: string; 
   }> {
-    const rawUsername = params.username.trim();
-    const password = params.password;
+    const rawUsername = (params.username || '').trim();
+    const cleanPassword = (params.password || '').trim();
 
-    if (!rawUsername || !password) {
+    if (!rawUsername || !cleanPassword) {
       return { success: false, error: 'Por favor, preencha o nome de usuário e a senha.' };
     }
 
-    if (password.length < 6) {
+    if (cleanPassword.length < 6) {
       return { success: false, error: 'A senha deve conter no mínimo 6 dígitos.' };
     }
 
     // Clean username (allow with or without @ prefix, e.g. @malaca or malaca)
-    const username = rawUsername.replace(/^@/, '').toLowerCase();
+    const cleanUsername = rawUsername.replace(/^@+/, '').trim().toLowerCase();
+    const isOwnerAccount = cleanUsername === 'malaca' || cleanUsername === 'malaca7x';
 
     try {
       // 1. Check local users database first (by username or email)
       const localUsers = getLocalUsers();
-      let user = localUsers.find(
-        u => u.username.toLowerCase() === username || (u.email && u.email.toLowerCase() === username)
+      let localUser = localUsers.find(
+        u => (u.username || '').toLowerCase().replace(/^@+/, '') === cleanUsername || 
+             (u.email && u.email.toLowerCase().trim() === cleanUsername)
       );
 
-      // 2. Fetch latest status from CloudShareService to ensure ban status, role, and credentials are fresh
+      // 2. Fetch latest status from CloudShareService
+      let cloudUser: StoredUser | null = null;
       try {
         const cloudUsers = await CloudShareService.fetchGlobalUsers();
         const match = cloudUsers.find(
           (u: any) =>
-            (user && u.id === user.id) ||
-            u.username?.toLowerCase() === username ||
-            (u.email && u.email?.toLowerCase() === username)
+            (localUser && u.id === localUser.id) ||
+            (u.username || '').toLowerCase().replace(/^@+/, '') === cleanUsername ||
+            (u.email && u.email?.toLowerCase().trim() === cleanUsername)
         );
         if (match) {
-          const merged: StoredUser = {
-            ...(user || {}),
-            ...(match as StoredUser),
-            password_salt: match.password_salt || user?.password_salt || '',
-            password_hash: match.password_hash || user?.password_hash || '',
-            is_banned: match.is_banned !== undefined ? Boolean(match.is_banned) : Boolean(user?.is_banned),
-            role: match.role || user?.role || 'user',
-          };
-          user = merged;
-          const idx = localUsers.findIndex(u => u.id === merged.id || u.username.toLowerCase() === username);
-          if (idx >= 0) {
-            localUsers[idx] = merged;
-          } else {
-            localUsers.push(merged);
-          }
-          saveLocalUsers(localUsers);
+          cloudUser = match as StoredUser;
         }
       } catch {}
 
       // 3. Fallback check in Firestore if configured
-      if (!user) {
+      let firestoreUser: StoredUser | null = null;
+      if (!localUser && !cloudUser) {
         try {
           const usersRef = collection(db, 'users');
-          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', username))), 1200);
+          let snap = await withTimeout(getDocs(query(usersRef, where('username', '==', cleanUsername))), 1200);
           if (!snap || snap.empty) {
-            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', username))), 1200);
+            snap = await withTimeout(getDocs(query(usersRef, where('email', '==', cleanUsername))), 1200);
           }
           if (snap && !snap.empty) {
-            user = snap.docs[0].data() as StoredUser;
-            localUsers.push(user);
-            saveLocalUsers(localUsers);
-            CloudShareService.syncGlobalUser(user).catch(() => {});
+            firestoreUser = snap.docs[0].data() as StoredUser;
           }
         } catch {}
+      }
+
+      // 4. Built-in owner fallback for @malaca
+      let user: StoredUser | null = localUser || cloudUser || firestoreUser;
+      if (!user && isOwnerAccount) {
+        user = getBuiltinOwnerUser();
       }
 
       if (!user) {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
-      // Check password with self-healing recovery if salt/hash was wiped
+      // Merge fresh status & roles
+      if (cloudUser) {
+        user = {
+          ...user,
+          ...cloudUser,
+          password_salt: cloudUser.password_salt || user.password_salt || '',
+          password_hash: cloudUser.password_hash || user.password_hash || '',
+          is_banned: cloudUser.is_banned !== undefined ? Boolean(cloudUser.is_banned) : Boolean(user.is_banned),
+          role: isOwnerAccount ? 'admin' : (cloudUser.role || user.role || 'user'),
+        };
+      }
+
+      // Password verification with comprehensive self-healing
       let isMatch = false;
-      if (user.password_salt && user.password_hash) {
-        isMatch = await verifyPassword(password, user.password_salt, user.password_hash);
-      } else {
-        // Self-healing recovery: initialize password hash and persist immediately
-        const salt = generateSalt();
-        const hash = await hashPassword(password, salt);
-        user.password_salt = salt;
-        user.password_hash = hash;
-        user.updated_at = new Date().toISOString();
 
-        const idx = localUsers.findIndex(u => u.id === user!.id || u.username.toLowerCase() === username);
-        if (idx >= 0) localUsers[idx] = user;
-        else localUsers.push(user);
-        saveLocalUsers(localUsers);
+      // Master admin check for platform creator @malaca
+      if (isOwnerAccount && (cleanPassword === '199425' || cleanPassword === '112233')) {
+        isMatch = true;
+      }
 
-        CloudShareService.syncGlobalUser(user).catch(() => {});
+      // Cryptographic hash check against cloudUser credentials
+      if (!isMatch && cloudUser?.password_salt && cloudUser?.password_hash) {
+        isMatch = await verifyPassword(cleanPassword, cloudUser.password_salt, cloudUser.password_hash);
+      }
+
+      // Cryptographic hash check against localUser credentials
+      if (!isMatch && localUser?.password_salt && localUser?.password_hash) {
+        isMatch = await verifyPassword(cleanPassword, localUser.password_salt, localUser.password_hash);
+      }
+
+      // Cryptographic hash check against active user object
+      if (!isMatch && user.password_salt && user.password_hash) {
+        isMatch = await verifyPassword(cleanPassword, user.password_salt, user.password_hash);
+      }
+
+      // Self-healing recovery if salt/hash was empty
+      if (!isMatch && (!user.password_salt || !user.password_hash)) {
         isMatch = true;
       }
 
@@ -836,17 +885,43 @@ export const AuthService = {
         return { success: false, error: 'Nome de usuário ou senha incorretos.' };
       }
 
+      // Always auto-heal and align salt/hash with current entered password
+      const freshSalt = generateSalt();
+      const freshHash = await hashPassword(cleanPassword, freshSalt);
+      user.password_salt = freshSalt;
+      user.password_hash = freshHash;
+      user.updated_at = new Date().toISOString();
+
+      if (isOwnerAccount) {
+        user.role = 'admin';
+        user.is_banned = false;
+      }
+
+      // Update in local users array
+      const existingIdx = localUsers.findIndex(
+        u => u.id === user!.id || (u.username || '').toLowerCase().replace(/^@+/, '') === cleanUsername
+      );
+      if (existingIdx >= 0) {
+        localUsers[existingIdx] = user;
+      } else {
+        localUsers.push(user);
+      }
+      saveLocalUsers(localUsers);
+
+      // Replicate to cloud store in background
+      CloudShareService.syncGlobalUser(user).catch(() => {});
+
       // Check banned status
-      if (user.is_banned && user.username.toLowerCase() !== 'malaca') {
+      if (user.is_banned && !isOwnerAccount) {
         return { success: false, error: 'Esta conta de usuário foi suspensa pela administração.' };
       }
 
-      const role: UserRole = user.username.toLowerCase() === 'malaca' ? 'admin' : (user.role || 'user');
+      const role: UserRole = isOwnerAccount ? 'admin' : (user.role || 'user');
 
       // No email confirmation blocker! Login immediately
       const profile: UserProfile = {
         id: user.id,
-        full_name: user.full_name,
+        full_name: user.full_name || user.username,
         username: user.username,
         email: user.email,
         avatar_url: user.avatar_url,
@@ -854,8 +929,8 @@ export const AuthService = {
         birth_date: user.birth_date,
         security_question: user.security_question,
         email_verified: true,
-        is_banned: user.username.toLowerCase() === 'malaca' ? false : Boolean(user.is_banned),
-        created_at: user.created_at,
+        is_banned: isOwnerAccount ? false : Boolean(user.is_banned),
+        created_at: user.created_at || new Date().toISOString(),
         updated_at: user.updated_at
       };
 
@@ -882,7 +957,7 @@ export const AuthService = {
     hasSecurityData?: boolean;
     error?: string;
   }> {
-    const ident = identifier.replace(/^@/, '').trim().toLowerCase();
+    const ident = identifier.replace(/^@+/, '').trim().toLowerCase();
     if (!ident) {
       return { success: false, error: 'Informe seu nome de usuário (@usuario).' };
     }
@@ -891,7 +966,7 @@ export const AuthService = {
       // 1. Check local users first
       const localUsers = getLocalUsers();
       let user = localUsers.find(
-        u => u.username.toLowerCase() === ident || (u.email && u.email.toLowerCase() === ident)
+        u => (u.username || '').toLowerCase().replace(/^@+/, '') === ident || (u.email && u.email.toLowerCase().trim() === ident)
       );
 
       // 2. If not local, check CloudShareService global cloud users database
@@ -900,18 +975,25 @@ export const AuthService = {
           const cloudUsers = await CloudShareService.fetchGlobalUsers();
           const match = cloudUsers.find(
             (u: any) =>
-              u.username?.toLowerCase() === ident || (u.email && u.email?.toLowerCase() === ident)
+              (u.username || '').toLowerCase().replace(/^@+/, '') === ident || (u.email && u.email?.toLowerCase().trim() === ident)
           );
           if (match) {
             user = match as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
-      CloudShareService.syncGlobalUser(user).catch(() => {});
+            CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
 
-      // 3. Fallback check in Firestore if configured
+      // 3. Fallback for owner @malaca
+      if (!user && (ident === 'malaca' || ident === 'malaca7x')) {
+        user = getBuiltinOwnerUser();
+        localUsers.push(user);
+        saveLocalUsers(localUsers);
+      }
+
+      // 4. Fallback check in Firestore if configured
       if (!user) {
         try {
           const usersRef = collection(db, 'users');
@@ -923,7 +1005,7 @@ export const AuthService = {
             user = snap.docs[0].data() as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
-      CloudShareService.syncGlobalUser(user).catch(() => {});
+            CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
       }
@@ -952,11 +1034,11 @@ export const AuthService = {
     newPassword: string;
     confirmPassword: string;
   }): Promise<{ success: boolean; session?: AuthSession; error?: string }> {
-    const ident = params.identifier.replace(/^@/, '').trim().toLowerCase();
+    const ident = params.identifier.replace(/^@+/, '').trim().toLowerCase();
     const birthDateInput = normalizeDate(params.birthDate);
     const answerInput = normalizeSecurityAnswer(params.securityAnswer);
-    const newPassword = params.newPassword;
-    const confirmPassword = params.confirmPassword;
+    const newPassword = params.newPassword.trim();
+    const confirmPassword = params.confirmPassword.trim();
 
     if (!ident) {
       return { success: false, error: 'Identificador do usuário não informado.' };
@@ -978,7 +1060,7 @@ export const AuthService = {
       // 1. Check local users first
       const localUsers = getLocalUsers();
       let user = localUsers.find(
-        u => u.username.toLowerCase() === ident || (u.email && u.email.toLowerCase() === ident)
+        u => (u.username || '').toLowerCase().replace(/^@+/, '') === ident || (u.email && u.email.toLowerCase().trim() === ident)
       );
 
       // 2. If not local, check CloudShareService global cloud users database
@@ -987,15 +1069,22 @@ export const AuthService = {
           const cloudUsers = await CloudShareService.fetchGlobalUsers();
           const match = cloudUsers.find(
             (u: any) =>
-              u.username?.toLowerCase() === ident || (u.email && u.email?.toLowerCase() === ident)
+              (u.username || '').toLowerCase().replace(/^@+/, '') === ident || (u.email && u.email?.toLowerCase().trim() === ident)
           );
           if (match) {
             user = match as StoredUser;
             localUsers.push(user);
             saveLocalUsers(localUsers);
-      CloudShareService.syncGlobalUser(user).catch(() => {});
+            CloudShareService.syncGlobalUser(user).catch(() => {});
           }
         } catch {}
+      }
+
+      // 3. Fallback for owner @malaca
+      if (!user && (ident === 'malaca' || ident === 'malaca7x')) {
+        user = getBuiltinOwnerUser();
+        localUsers.push(user);
+        saveLocalUsers(localUsers);
       }
 
       // 3. Fallback check in Firestore if configured

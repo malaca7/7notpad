@@ -561,19 +561,31 @@ export const CloudShareService = {
       let existingUsers: Record<string, any>[] = [];
 
       const currentDoc = await fetchCloudDocument(usersKey);
-      if (currentDoc && Array.isArray(currentDoc.users)) {
+      if (currentDoc && Array.isArray(currentDoc.users) && currentDoc.users.length > 0) {
         existingUsers = currentDoc.users;
+      } else {
+        // Fallback to local storage users to prevent wiping database on network glitch!
+        try {
+          const raw = localStorage.getItem('7notpad_users_store');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              existingUsers = parsed;
+            }
+          }
+        } catch {}
       }
 
       const cleanUsername = (user.username || '').trim().toLowerCase().replace(/^@+/, '');
       const existingUser = existingUsers.find(
-        (u) => u.id === user.id || u.username?.toLowerCase() === cleanUsername
+        (u) => u.id === user.id || (u.username || '').toLowerCase().replace(/^@+/, '') === cleanUsername
       );
       const filtered = existingUsers.filter(
-        (u) => u.id !== user.id && u.username?.toLowerCase() !== cleanUsername
+        (u) => u.id !== user.id && (u.username || '').toLowerCase().replace(/^@+/, '') !== cleanUsername
       );
 
       // Preserve credentials & security fields if caller passed partial profile object!
+      const isOwnerAccount = cleanUsername === 'malaca' || cleanUsername === 'malaca7x';
       const mergedUser: Record<string, any> = {
         ...(existingUser || {}),
         ...user,
@@ -583,10 +595,32 @@ export const CloudShareService = {
         password_hash: user.password_hash || existingUser?.password_hash,
         security_answer: user.security_answer || existingUser?.security_answer,
         username: cleanUsername,
+        role: isOwnerAccount ? 'admin' : (user.role || existingUser?.role || 'user'),
+        is_banned: isOwnerAccount ? false : Boolean(user.is_banned !== undefined ? user.is_banned : existingUser?.is_banned),
         updated_at: user.updated_at || new Date().toISOString(),
       };
 
       filtered.unshift(mergedUser);
+
+      // Always guarantee built-in platform owner @malaca exists in global users
+      if (!filtered.some((u) => (u.username || '').toLowerCase().replace(/^@+/, '') === 'malaca')) {
+        filtered.push({
+          id: 'usr_malaca_admin',
+          full_name: 'Malaca',
+          username: 'malaca',
+          email: 'malaca@7notpad.com',
+          role: 'admin',
+          birth_date: '1994-06-25',
+          security_question: 'Qual o nome do seu primeiro animal de estimação?',
+          security_answer: 'zeus',
+          password_salt: 'malaca_super_salt_2026',
+          password_hash: '8df8484584e4a42734a7717101bb372c47f76b3756d5e0a3f213577766509813',
+          email_verified: true,
+          is_banned: false,
+          created_at: '2026-11-01T00:00:00.000Z',
+          updated_at: new Date().toISOString(),
+        });
+      }
 
       // Broadcast user updated to all screens in real time immediately (0ms delay)
       publishGlobalRealtimeEvent({
@@ -604,7 +638,7 @@ export const CloudShareService = {
         full_name: mergedUser.full_name || cleanUsername,
       }).catch(() => {});
 
-      saveCloudDocument(usersKey, { users: filtered }).catch(() => {});
+      saveCloudDocument(usersKey, { users: filtered, updated_at: new Date().toISOString() }).catch(() => {});
     } catch (err) {
       console.warn('CloudShareService.syncGlobalUser warning:', err);
     }
@@ -614,15 +648,42 @@ export const CloudShareService = {
    * Fetch all registered users from the global cloud users database
    */
   async fetchGlobalUsers(): Promise<Record<string, any>[]> {
+    const builtinMalaca = {
+      id: 'usr_malaca_admin',
+      full_name: 'Malaca',
+      username: 'malaca',
+      email: 'malaca@7notpad.com',
+      role: 'admin',
+      birth_date: '1994-06-25',
+      security_question: 'Qual o nome do seu primeiro animal de estimação?',
+      security_answer: 'zeus',
+      password_salt: 'malaca_super_salt_2026',
+      password_hash: '8df8484584e4a42734a7717101bb372c47f76b3756d5e0a3f213577766509813',
+      email_verified: true,
+      is_banned: false,
+      created_at: '2026-11-01T00:00:00.000Z',
+      updated_at: new Date().toISOString(),
+    };
+
     try {
       const usersKey = '7notpad_global_users_store_v2';
       const doc = await fetchCloudDocument(usersKey);
+      let users: Record<string, any>[] = [];
       if (doc && Array.isArray(doc.users)) {
-        return doc.users;
+        users = doc.users;
       }
-      return [];
+
+      // Ensure platform owner @malaca is always present in global users list
+      const hasMalaca = users.some(
+        (u) => (u.username || '').toLowerCase().replace(/^@+/, '') === 'malaca'
+      );
+      if (!hasMalaca) {
+        users.unshift(builtinMalaca);
+      }
+
+      return users;
     } catch {
-      return [];
+      return [builtinMalaca];
     }
   },
 

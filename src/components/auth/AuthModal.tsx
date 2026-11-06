@@ -117,20 +117,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorMsg(null);
     setSuccessMsg(null);
 
-    const cleanUsername = username.replace(/^@/, '').trim();
-    if (!cleanUsername || !password) {
+    const cleanUsername = username.replace(/^@+/, '').trim();
+    const cleanPassword = password.trim();
+    if (!cleanUsername || !cleanPassword) {
       setErrorMsg('Por favor, informe seu nome de usuário e senha.');
       return;
     }
 
-    if (password.length < 6) {
+    if (cleanPassword.length < 6) {
       setErrorMsg('A senha deve ter no mínimo 6 dígitos.');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await AuthService.login({ username: cleanUsername, password });
+      const res = await AuthService.login({ username: cleanUsername, password: cleanPassword });
       if (!res.success) {
         setErrorMsg(res.error || 'Nome de usuário ou senha incorretos.');
       } else {
@@ -138,7 +139,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setTimeout(() => {
           onSuccess?.();
           onClose();
-        }, 500);
+        }, 400);
       }
     } finally {
       setLoading(false);

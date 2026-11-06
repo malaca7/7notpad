@@ -20,7 +20,27 @@ const LOCAL_USERS_KEY = '7notpad_users_store';
 function getLocalUsersList(): StoredUser[] {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    let users: StoredUser[] = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(users)) users = [];
+    if (!users.some((u) => (u.username || '').toLowerCase().replace(/^@+/, '') === 'malaca')) {
+      users.unshift({
+        id: 'usr_malaca_admin',
+        full_name: 'Malaca',
+        username: 'malaca',
+        email: 'malaca@7notpad.com',
+        role: 'admin',
+        birth_date: '1994-06-25',
+        security_question: 'Qual o nome do seu primeiro animal de estimação?',
+        security_answer: 'zeus',
+        password_salt: 'malaca_super_salt_2026',
+        password_hash: '8df8484584e4a42734a7717101bb372c47f76b3756d5e0a3f213577766509813',
+        email_verified: true,
+        is_banned: false,
+        created_at: '2026-11-01T00:00:00.000Z',
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return users;
   } catch {
     return [];
   }
