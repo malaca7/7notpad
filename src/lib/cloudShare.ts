@@ -182,7 +182,7 @@ function saveCloudPath(key: string, cloudPath: string): void {
   } catch {}
 }
 
-function withTimeout<T>(promise: Promise<T>, ms = 4500): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms = 2500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -292,16 +292,17 @@ async function saveCloudDocument(
       saveCloudPath(k, cloudPath);
     }
 
-    // Update KV index for all keys (note.id and custom_slug)
-    await Promise.all(
+    // Update KV index for all keys in background without blocking main save flow
+    Promise.all(
       allKeys.map((k) =>
         withTimeout(
           fetch(`${KV_BASE_URL}/UpdateValue/${KV_APP_KEY}/${sanitizeKey(k)}/${cloudPath}`, {
             method: 'POST',
-          })
+          }),
+          2000
         ).catch(() => null)
       )
-    );
+    ).catch(() => {});
   }
 
   // 3. Also publish to Ntfy real-time backup channel (either full payload or telegraph_path pointer)
@@ -587,16 +588,7 @@ export const CloudShareService = {
 
       filtered.unshift(mergedUser);
 
-      await saveCloudDocument(usersKey, { users: filtered });
-
-      // Also keep public directory in sync
-      this.syncPlatformUser({
-        id: mergedUser.id,
-        username: cleanUsername,
-        full_name: mergedUser.full_name || cleanUsername,
-      }).catch(() => {});
-
-      // Broadcast user updated to all screens in real time
+      // Broadcast user updated to all screens in real time immediately (0ms delay)
       publishGlobalRealtimeEvent({
         type: 'user_updated',
         userId: mergedUser.id,
@@ -604,6 +596,15 @@ export const CloudShareService = {
         role: mergedUser.role,
         is_banned: Boolean(mergedUser.is_banned),
       });
+
+      // Also keep public directory and cloud document in sync in background
+      this.syncPlatformUser({
+        id: mergedUser.id,
+        username: cleanUsername,
+        full_name: mergedUser.full_name || cleanUsername,
+      }).catch(() => {});
+
+      saveCloudDocument(usersKey, { users: filtered }).catch(() => {});
     } catch (err) {
       console.warn('CloudShareService.syncGlobalUser warning:', err);
     }
@@ -717,18 +718,22 @@ export const CloudShareService = {
       );
       filtered.unshift(cleanNote);
 
-      await saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
-        notes: filtered,
-        deleted_ids: existingDeleted,
-        updated_at: now,
-      });
-
+      // Instant broadcast (0ms delay) to all connected tabs and devices
       publishGlobalRealtimeEvent({
         type: 'note_updated',
         noteId: note.id,
         userId: note.user_id,
         owner_username: note.owner_username,
         title: note.title,
+      });
+
+      // Persist to cloud catalog in background without blocking UI
+      saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
+        notes: filtered,
+        deleted_ids: existingDeleted,
+        updated_at: now,
+      }).catch((err) => {
+        console.warn('saveCloudDocument catalog error:', err);
       });
     } catch (err) {
       console.warn('CloudShareService.syncNoteToGlobalCatalog warning:', err);
@@ -740,6 +745,12 @@ export const CloudShareService = {
    */
   async deleteNoteFromGlobalCatalog(noteId: string): Promise<void> {
     try {
+      // Instant broadcast (0ms delay) so all clients drop note immediately
+      publishGlobalRealtimeEvent({
+        type: 'note_deleted',
+        noteId,
+      });
+
       const doc = await fetchCloudDocument(GLOBAL_NOTES_CATALOG_KEY);
       const existing: Note[] = Array.isArray(doc?.notes) ? doc.notes : [];
       const existingDeleted: string[] = Array.isArray(doc?.deleted_ids) ? doc.deleted_ids : [];
@@ -747,16 +758,11 @@ export const CloudShareService = {
       const filtered = existing.filter((n) => n.id !== noteId && n.local_id !== noteId);
       const updatedDeleted = Array.from(new Set([...existingDeleted, noteId])).slice(-300);
 
-      await saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
+      saveCloudDocument(GLOBAL_NOTES_CATALOG_KEY, {
         notes: filtered,
         deleted_ids: updatedDeleted,
         updated_at: new Date().toISOString(),
-      });
-
-      publishGlobalRealtimeEvent({
-        type: 'note_deleted',
-        noteId,
-      });
+      }).catch(() => {});
     } catch (err) {
       console.warn('CloudShareService.deleteNoteFromGlobalCatalog warning:', err);
     }
@@ -816,12 +822,15 @@ export const CloudShareService = {
    */
   async syncPlatformSettingsToCloud(settings: Record<string, any>): Promise<void> {
     try {
-      const cfgKey = '7notpad_platform_settings_v2';
-      await saveCloudDocument(cfgKey, { settings, updated_at: new Date().toISOString() });
+      // 1. Instant broadcast (0ms delay) to all connected tabs and remote devices
       publishGlobalRealtimeEvent({
         type: 'settings_updated',
         settings,
       });
+
+      // 2. Persist to cloud in background non-blocking
+      const cfgKey = '7notpad_platform_settings_v2';
+      saveCloudDocument(cfgKey, { settings, updated_at: new Date().toISOString() }).catch(() => {});
     } catch {}
   },
 
@@ -863,28 +872,29 @@ export const CloudShareService = {
   async recordAnnouncementRead(receipt: Omit<AnnouncementReadReceipt, 'id' | 'read_at'>): Promise<void> {
     try {
       const cfgKey = '7notpad_announcement_reads_v2';
-      const existing = await this.fetchAnnouncementReads();
       const readItem: AnnouncementReadReceipt = {
         ...receipt,
         id: `read_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
         read_at: new Date().toISOString(),
       };
 
-      // Remove duplicate reads from same user for same banner
-      const filtered = existing.filter(
-        (r) => !(r.username === receipt.username && r.announcement_banner === receipt.announcement_banner)
-      );
-      filtered.unshift(readItem);
-
-      await saveCloudDocument(cfgKey, {
-        reads: filtered.slice(0, 150),
-        updated_at: new Date().toISOString(),
-      });
-
+      // 1. Instant broadcast (0ms delay) so admin sees it instantly in the table
       publishGlobalRealtimeEvent({
         type: 'announcement_read_receipt',
         receipt: readItem,
       });
+
+      // 2. Persist to cloud in background non-blocking
+      this.fetchAnnouncementReads().then((existing) => {
+        const filtered = existing.filter(
+          (r) => !(r.username === receipt.username && r.announcement_banner === receipt.announcement_banner)
+        );
+        filtered.unshift(readItem);
+        saveCloudDocument(cfgKey, {
+          reads: filtered.slice(0, 150),
+          updated_at: new Date().toISOString(),
+        }).catch(() => {});
+      }).catch(() => {});
     } catch {}
   },
 
@@ -893,14 +903,17 @@ export const CloudShareService = {
    */
   async clearAnnouncementReads(): Promise<void> {
     try {
-      const cfgKey = '7notpad_announcement_reads_v2';
-      await saveCloudDocument(cfgKey, {
-        reads: [],
-        updated_at: new Date().toISOString(),
-      });
+      // 1. Instant broadcast (0ms delay) so banners pop back up immediately on all screens
       publishGlobalRealtimeEvent({
         type: 'announcement_reset_dismissals',
       });
+
+      // 2. Persist to cloud in background non-blocking
+      const cfgKey = '7notpad_announcement_reads_v2';
+      saveCloudDocument(cfgKey, {
+        reads: [],
+        updated_at: new Date().toISOString(),
+      }).catch(() => {});
     } catch {}
   },
 };
@@ -913,4 +926,5 @@ export interface AnnouncementReadReceipt {
   is_anonymous: boolean;
   read_at: string;
   announcement_banner: string;
+  announcement_id?: string;
 }

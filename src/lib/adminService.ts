@@ -369,8 +369,8 @@ export const AdminService = {
       user.updated_at = now;
       saveLocalUsersList(localUsers);
 
-      // Sync to CloudShareService global database!
-      await CloudShareService.syncGlobalUser(user).catch(() => {});
+      // Sync to CloudShareService global database non-blocking
+      CloudShareService.syncGlobalUser(user).catch(() => {});
     }
 
     // If current session user was modified, update local session and notify
@@ -775,22 +775,24 @@ export const AdminService = {
     const localNotes = getLocalNotes();
     saveLocalNotes([newNote, ...localNotes]);
 
-    // 2. Sync to cloud and global catalog
-    try {
-      await CloudShareService.syncNoteToCloud(newNote, share);
-      await CloudShareService.syncNoteToGlobalCatalog(newNote, share);
-      CloudShareService.publishGlobalRealtimeEvent({
-        type: 'note_updated',
-        noteId: newNote.id,
-        title: newNote.title,
-        owner_username: newNote.owner_username,
-        user_id: newNote.user_id,
-      });
-    } catch (err) {
-      console.warn('AdminService.createNote cloud sync warning:', err);
-    }
+    // 2. Broadcast real-time creation immediately (0ms delay)
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'note_updated',
+      noteId: newNote.id,
+      title: newNote.title,
+      owner_username: newNote.owner_username,
+      user_id: newNote.user_id,
+    });
 
-    // 3. Sync to Firestore non-blocking
+    // 3. Sync to cloud and global catalog in background concurrently
+    Promise.all([
+      CloudShareService.syncNoteToCloud(newNote, share),
+      CloudShareService.syncNoteToGlobalCatalog(newNote, share),
+    ]).catch((err) => {
+      console.warn('AdminService.createNote cloud sync warning:', err);
+    });
+
+    // 4. Sync to Firestore non-blocking
     try {
       setDoc(doc(db, 'notes', newNote.id), newNote).catch(() => {});
     } catch {}
@@ -924,22 +926,24 @@ export const AdminService = {
     }
     saveLocalNotes(localNotes);
 
-    // 5. Sync to Global Cloud Catalog & Cloud storage immediately
-    try {
-      await CloudShareService.syncNoteToGlobalCatalog(updatedNote, updatedShare);
-      await CloudShareService.syncNoteToCloud(updatedNote, updatedShare);
-      CloudShareService.publishGlobalRealtimeEvent({
-        type: 'note_updated',
-        noteId: updatedNote.id,
-        title: updatedNote.title,
-        owner_username: updatedNote.owner_username,
-        user_id: updatedNote.user_id,
-      });
-    } catch (err) {
-      console.warn('AdminService.updateNote cloud sync warning:', err);
-    }
+    // 5. Broadcast real-time update immediately (0ms delay)
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'note_updated',
+      noteId: updatedNote.id,
+      title: updatedNote.title,
+      owner_username: updatedNote.owner_username,
+      user_id: updatedNote.user_id,
+    });
 
-    // 6. Non-blocking Firestore update
+    // 6. Sync to Global Cloud Catalog & Cloud storage concurrently in background
+    Promise.all([
+      CloudShareService.syncNoteToGlobalCatalog(updatedNote, updatedShare),
+      CloudShareService.syncNoteToCloud(updatedNote, updatedShare),
+    ]).catch((err) => {
+      console.warn('AdminService.updateNote cloud sync warning:', err);
+    });
+
+    // 7. Non-blocking Firestore update
     try {
       updateDoc(doc(db, 'notes', noteId), {
         ...updatedNote,
@@ -973,18 +977,18 @@ export const AdminService = {
       saveLocalShares(updatedShares);
     }
 
-    // 4. Delete from global cloud catalog & broadcast tombstone event
-    try {
-      await CloudShareService.deleteNoteFromGlobalCatalog(noteId);
-      CloudShareService.publishGlobalRealtimeEvent({
-        type: 'note_deleted',
-        noteId,
-      });
-    } catch (err) {
-      console.warn('AdminService.deleteNote cloud delete warning:', err);
-    }
+    // 4. Broadcast tombstone event immediately (0ms delay)
+    CloudShareService.publishGlobalRealtimeEvent({
+      type: 'note_deleted',
+      noteId,
+    });
 
-    // 5. Delete from Firestore non-blocking
+    // 5. Delete from global cloud catalog in background
+    CloudShareService.deleteNoteFromGlobalCatalog(noteId).catch((err) => {
+      console.warn('AdminService.deleteNote cloud delete warning:', err);
+    });
+
+    // 6. Delete from Firestore non-blocking
     try {
       deleteDoc(doc(db, 'notes', noteId)).catch(() => {});
     } catch {}
